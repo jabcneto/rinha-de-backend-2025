@@ -23,6 +23,10 @@ type QueueService interface {
 
 // PaymentRepository is imported here to avoid circular dependency
 type PaymentRepository interface {
+	// Save saves a payment to the repository
+	Save(ctx context.Context, payment *entities.Payment) error
+	// UpdateSummary updates the payment summary
 	UpdateSummary(ctx context.Context, processorType entities.ProcessorType, amount float64) error
+	// Update updates an existing payment
 	Update(ctx context.Context, payment *entities.Payment) error
 }

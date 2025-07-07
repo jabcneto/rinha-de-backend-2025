@@ -20,11 +20,17 @@ type PaymentSummaryFilter struct {
 	To   *time.Time
 }
 
-// NewPaymentSummary creates a new payment summary
+// NewPaymentSummary creates a new payment summary with zero values
 func NewPaymentSummary() *PaymentSummary {
 	return &PaymentSummary{
-		Default:  ProcessorSummary{},
-		Fallback: ProcessorSummary{},
+		Default: ProcessorSummary{
+			TotalRequests: 0,
+			TotalAmount:   0.0,
+		},
+		Fallback: ProcessorSummary{
+			TotalRequests: 0,
+			TotalAmount:   0.0,
+		},
 	}
 }
 
@@ -40,8 +46,10 @@ func (ps *PaymentSummary) AddPayment(processorType ProcessorType, amount float64
 	}
 }
 
-// Reset resets all summary data
+// Reset resets all summary data to zero
 func (ps *PaymentSummary) Reset() {
-	ps.Default = ProcessorSummary{}
-	ps.Fallback = ProcessorSummary{}
+	ps.Default.TotalRequests = 0
+	ps.Default.TotalAmount = 0.0
+	ps.Fallback.TotalRequests = 0
+	ps.Fallback.TotalAmount = 0.0
 }

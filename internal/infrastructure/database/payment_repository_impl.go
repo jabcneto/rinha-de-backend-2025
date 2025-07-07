@@ -48,11 +48,16 @@ func NewPaymentRepository(db *sql.DB) repositories.PaymentRepository {
 	return repo
 }
 
-// Save saves a payment to the repository
+// Save saves a payment to the repository (uses UPSERT)
 func (r *PaymentRepositoryImpl) Save(ctx context.Context, payment *entities.Payment) error {
 	query := `
 		INSERT INTO payments (id, correlation_id, amount, status, processor_type, requested_at, processed_at, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		ON CONFLICT (id) DO UPDATE SET
+			status = EXCLUDED.status,
+			processor_type = EXCLUDED.processor_type,
+			processed_at = EXCLUDED.processed_at,
+			updated_at = EXCLUDED.updated_at
 	`
 
 	_, err := r.db.ExecContext(ctx, query,
@@ -109,20 +114,28 @@ func (r *PaymentRepositoryImpl) FindByCorrelationID(ctx context.Context, correla
 	return payment, nil
 }
 
-// Update updates an existing payment
+// Update updates an existing payment (now uses UPSERT)
 func (r *PaymentRepositoryImpl) Update(ctx context.Context, payment *entities.Payment) error {
 	query := `
-		UPDATE payments 
-		SET status = $1, processor_type = $2, processed_at = $3, updated_at = $4
-		WHERE id = $5
+		INSERT INTO payments (id, correlation_id, amount, status, processor_type, requested_at, processed_at, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		ON CONFLICT (id) DO UPDATE SET
+			status = EXCLUDED.status,
+			processor_type = EXCLUDED.processor_type,
+			processed_at = EXCLUDED.processed_at,
+			updated_at = EXCLUDED.updated_at
 	`
 
 	_, err := r.db.ExecContext(ctx, query,
+		payment.ID,
+		payment.CorrelationID,
+		payment.Amount,
 		string(payment.Status),
 		string(payment.ProcessorType),
+		payment.RequestedAt,
 		payment.ProcessedAt,
+		payment.CreatedAt,
 		payment.UpdatedAt,
-		payment.ID,
 	)
 
 	return err
@@ -130,42 +143,66 @@ func (r *PaymentRepositoryImpl) Update(ctx context.Context, payment *entities.Pa
 
 // GetSummary returns payment summary with optional time filters (may block)
 func (r *PaymentRepositoryImpl) GetSummary(ctx context.Context, filter *entities.PaymentSummaryFilter) (*entities.PaymentSummary, error) {
-	r.mutex.RLock()
-	defer r.mutex.RUnlock()
-
 	summary := entities.NewPaymentSummary()
 
-	// Monta a cláusula WHERE dinamicamente
-	where := ""
+	// If no filters, return aggregated data from payment_summary table
+	if filter == nil || (filter.From == nil && filter.To == nil) {
+		// Query default processor summary
+		row := r.db.QueryRowContext(ctx, "SELECT total_requests, total_amount FROM payment_summary WHERE processor_type = $1", "default")
+		err := row.Scan(&summary.Default.TotalRequests, &summary.Default.TotalAmount)
+		if err != nil && err != sql.ErrNoRows {
+			return nil, fmt.Errorf("erro ao obter resumo default: %w", err)
+		}
+
+		// Query fallback processor summary
+		row = r.db.QueryRowContext(ctx, "SELECT total_requests, total_amount FROM payment_summary WHERE processor_type = $1", "fallback")
+		err = row.Scan(&summary.Fallback.TotalRequests, &summary.Fallback.TotalAmount)
+		if err != nil && err != sql.ErrNoRows {
+			return nil, fmt.Errorf("erro ao obter resumo fallback: %w", err)
+		}
+
+		return summary, nil
+	}
+
+	// If there are filters, query the payments table directly
+	whereClause := "WHERE 1=1"
 	args := []interface{}{}
-	argIdx := 1
-	if filter != nil {
-		if filter.From != nil {
-			where += fmt.Sprintf(" AND requested_at >= $%d", argIdx)
-			args = append(args, *filter.From)
-			argIdx++
-		}
-		if filter.To != nil {
-			where += fmt.Sprintf(" AND requested_at <= $%d", argIdx)
-			args = append(args, *filter.To)
-			argIdx++
-		}
+	argIndex := 1
+
+	if filter.From != nil {
+		whereClause += fmt.Sprintf(" AND created_at >= $%d", argIndex)
+		args = append(args, filter.From)
+		argIndex++
 	}
 
-	// Query default processor summary
-	queryDefault := "SELECT COUNT(*), COALESCE(SUM(amount),0) FROM payments WHERE processor_type = $1" + where
-	argsDefault := append([]interface{}{string(entities.ProcessorTypeDefault)}, args...)
-	row := r.db.QueryRowContext(ctx, queryDefault, argsDefault...)
-	if err := row.Scan(&summary.Default.TotalRequests, &summary.Default.TotalAmount); err != nil && err != sql.ErrNoRows {
-		return nil, fmt.Errorf("erro ao obter resumo default: %w", err)
+	if filter.To != nil {
+		whereClause += fmt.Sprintf(" AND created_at <= $%d", argIndex)
+		args = append(args, filter.To)
+		argIndex++
 	}
 
-	// Query fallback processor summary
-	queryFallback := "SELECT COUNT(*), COALESCE(SUM(amount),0) FROM payments WHERE processor_type = $1" + where
-	argsFallback := append([]interface{}{string(entities.ProcessorTypeFallback)}, args...)
-	row = r.db.QueryRowContext(ctx, queryFallback, argsFallback...)
-	if err := row.Scan(&summary.Fallback.TotalRequests, &summary.Fallback.TotalAmount); err != nil && err != sql.ErrNoRows {
-		return nil, fmt.Errorf("erro ao obter resumo fallback: %w", err)
+	// Query default processor summary with filters
+	query := fmt.Sprintf(`
+		SELECT 
+			COALESCE(COUNT(*), 0) as total_requests,
+			COALESCE(SUM(amount), 0) as total_amount
+		FROM payments 
+		%s AND processor_type = $%d
+	`, whereClause, argIndex)
+
+	argsDefault := append(args, "default")
+	row := r.db.QueryRowContext(ctx, query, argsDefault...)
+	err := row.Scan(&summary.Default.TotalRequests, &summary.Default.TotalAmount)
+	if err != nil {
+		return nil, fmt.Errorf("erro ao obter resumo default com filtros: %w", err)
+	}
+
+	// Query fallback processor summary with filters
+	argsFallback := append(args, "fallback")
+	row = r.db.QueryRowContext(ctx, query, argsFallback...)
+	err = row.Scan(&summary.Fallback.TotalRequests, &summary.Fallback.TotalAmount)
+	if err != nil {
+		return nil, fmt.Errorf("erro ao obter resumo fallback com filtros: %w", err)
 	}
 
 	return summary, nil

@@ -15,7 +15,7 @@ import (
 	"rinha-backend-clean/internal/infrastructure/external"
 	"rinha-backend-clean/internal/infrastructure/queue"
 	httpInterface "rinha-backend-clean/internal/interfaces/http"
-	
+	"rinha-backend-clean/internal/interfaces/http/handlers"
 )
 
 func main() {

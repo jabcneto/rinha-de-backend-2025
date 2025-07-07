@@ -58,7 +58,7 @@ type HealthCheckResponse struct {
 const (
 	HealthCheckPath            = "/payments/service-health"
 	PaymentsPath               = "/payments"
-	HealthCheckInterval        = 5 * time.Second
+	HealthCheckInterval        = 30 * time.Second // Aumentado de 5s para 30s
 	CircuitBreakerMaxFailures  = 3
 	CircuitBreakerResetTimeout = 10 * time.Second
 )
@@ -202,7 +202,6 @@ func (c *PaymentProcessorClient) runHealthCheck(ctx context.Context, isDefault b
 				processorName = "fallback"
 			}
 
-			log.Printf("Realizando health check para %s (%s)", processorName, processor.url)
 			health, err := c.getHealthCheck(ctx, processor.url)
 
 			c.mutex.Lock()
@@ -211,9 +210,13 @@ func (c *PaymentProcessorClient) runHealthCheck(ctx context.Context, isDefault b
 				processor.isFailing = true
 				log.Printf("Health check para %s falhou: %v", processorName, err)
 			} else {
+				wasFailingBefore := processor.isFailing
 				processor.isFailing = health.Failing
 				processor.minResponseTime = health.MinResponseTime
-				log.Printf("Health check para %s: Failing=%t, MinResponseTime=%d", processorName, health.Failing, health.MinResponseTime)
+
+				if wasFailingBefore != health.Failing || health.Failing {
+					log.Printf("Health check para %s: Failing=%t, MinResponseTime=%d", processorName, health.Failing, health.MinResponseTime)
+				}
 			}
 			c.mutex.Unlock()
 

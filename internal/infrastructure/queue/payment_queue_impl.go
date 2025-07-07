@@ -88,12 +88,12 @@ func (q *PaymentQueueImpl) processPayment(payment *entities.Payment, processor s
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	// Try to process payment
+	// Try to process payment first
 	processorType, err := processor.ProcessPayment(ctx, payment)
 	if err != nil {
 		log.Printf("Erro ao processar pagamento %s: %v", payment.CorrelationID, err)
 
-		// Mark payment as failed
+		// Mark payment as failed and try to update
 		payment.MarkAsFailed()
 		if updateErr := repository.Update(ctx, payment); updateErr != nil {
 			log.Printf("Erro ao atualizar status do pagamento %s: %v", payment.CorrelationID, updateErr)
@@ -101,10 +101,8 @@ func (q *PaymentQueueImpl) processPayment(payment *entities.Payment, processor s
 		return
 	}
 
-	// Mark payment as processed
+	// Mark payment as processed and update
 	payment.MarkAsProcessed(processorType)
-
-	// Update payment status
 	if err := repository.Update(ctx, payment); err != nil {
 		log.Printf("Erro ao atualizar pagamento %s: %v", payment.CorrelationID, err)
 	}

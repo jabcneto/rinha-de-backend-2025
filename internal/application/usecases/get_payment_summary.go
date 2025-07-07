@@ -29,7 +29,28 @@ func (uc *GetPaymentSummaryUseCase) Execute(ctx context.Context, req *dtos.Payme
 		To:   req.To,
 	}
 
-	// Try to get from cache first (non-blocking)
+	if req.From != nil || req.To != nil {
+		log.Printf("Filtros de data detectados, consultando banco de dados diretamente")
+		summary, err := uc.paymentRepo.GetSummary(ctx, filter)
+		if err != nil {
+			log.Printf("Erro ao obter resumo de pagamentos com filtros: %v", err)
+			return nil, err
+		}
+
+		// Convert to response DTO
+		return &dtos.PaymentSummaryResponse{
+			Default: dtos.ProcessorSummaryResponse{
+				TotalRequests: summary.Default.TotalRequests,
+				TotalAmount:   summary.Default.TotalAmount,
+			},
+			Fallback: dtos.ProcessorSummaryResponse{
+				TotalRequests: summary.Fallback.TotalRequests,
+				TotalAmount:   summary.Fallback.TotalAmount,
+			},
+		}, nil
+	}
+
+	// No filters, try to get from cache first (non-blocking)
 	summary, err := uc.paymentRepo.GetSummaryFromCache(ctx)
 	if err != nil {
 		// If cache fails, fallback to database (may block)

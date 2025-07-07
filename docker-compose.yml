@@ -68,6 +68,8 @@ services:
       POSTGRES_DB: rinha_db
     networks:
       - backend
+    ports:
+      - "5432:5432"
     deploy:
       resources:
         limits:

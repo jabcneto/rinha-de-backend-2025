@@ -2,6 +2,8 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -42,7 +44,8 @@ func (h *PaymentHandler) HandlePayments(w http.ResponseWriter, r *http.Request) 
 	// Execute use case
 	response, err := h.processPaymentUC.Execute(r.Context(), &req)
 	if err != nil {
-		if validationErr, ok := err.(*dtos.ValidationError); ok {
+		var validationErr *dtos.ValidationError
+		if errors.As(err, &validationErr) {
 			h.writeErrorResponse(w, validationErr.Message, http.StatusBadRequest)
 			return
 		}
@@ -60,8 +63,8 @@ func (h *PaymentHandler) HandlePaymentsSummary(w http.ResponseWriter, r *http.Re
 	req := &dtos.PaymentSummaryRequest{}
 
 	if fromStr := r.URL.Query().Get("from"); fromStr != "" {
-		if parsed, err := time.Parse("2006-01-02T15:04:05", fromStr); err != nil {
-			h.writeErrorResponse(w, "Invalid 'from' timestamp format. Use yyyy-MM-ddTHH:mm:ss format.", http.StatusBadRequest)
+		if parsed, err := h.parseTimestamp(fromStr); err != nil {
+			h.writeErrorResponse(w, "Invalid 'from' timestamp format. Use yyyy-MM-ddTHH:mm:ss or ISO format.", http.StatusBadRequest)
 			return
 		} else {
 			req.From = &parsed
@@ -69,8 +72,8 @@ func (h *PaymentHandler) HandlePaymentsSummary(w http.ResponseWriter, r *http.Re
 	}
 
 	if toStr := r.URL.Query().Get("to"); toStr != "" {
-		if parsed, err := time.Parse("2006-01-02T15:04:05", toStr); err != nil {
-			h.writeErrorResponse(w, "Invalid 'to' timestamp format. Use yyyy-MM-ddTHH:mm:ss format.", http.StatusBadRequest)
+		if parsed, err := h.parseTimestamp(toStr); err != nil {
+			h.writeErrorResponse(w, "Invalid 'to' timestamp format. Use yyyy-MM-ddTHH:mm:ss or ISO format.", http.StatusBadRequest)
 			return
 		} else {
 			req.To = &parsed
@@ -113,4 +116,24 @@ func (h *PaymentHandler) writeErrorResponse(w http.ResponseWriter, message strin
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
 	json.NewEncoder(w).Encode(map[string]string{"error": message})
+}
+
+// parseTimestamp attempts to parse timestamp in multiple formats
+func (h *PaymentHandler) parseTimestamp(timeStr string) (time.Time, error) {
+	// Try different formats
+	formats := []string{
+		"2006-01-02T15:04:05",      // yyyy-MM-ddTHH:mm:ss
+		"2006-01-02T15:04:05.000Z", // ISO with milliseconds and Z
+		"2006-01-02T15:04:05Z",     // ISO without milliseconds but with Z
+		time.RFC3339,               // RFC3339 format
+		time.RFC3339Nano,           // RFC3339 with nanoseconds
+	}
+
+	for _, format := range formats {
+		if parsed, err := time.Parse(format, timeStr); err == nil {
+			return parsed, nil
+		}
+	}
+
+	return time.Time{}, fmt.Errorf("unsupported timestamp format: %s", timeStr)
 }
