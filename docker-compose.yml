@@ -9,40 +9,73 @@ services:
       POSTGRES_INITDB_ARGS: "--data-checksums"
     command: >
       postgres
-      -c shared_buffers=64MB
-      -c effective_cache_size=128MB
-      -c maintenance_work_mem=16MB
+      -c shared_buffers=32MB
+      -c effective_cache_size=64MB
+      -c maintenance_work_mem=8MB
       -c checkpoint_completion_target=0.9
-      -c wal_buffers=16MB
+      -c wal_buffers=8MB
       -c default_statistics_target=100
       -c random_page_cost=1.1
       -c effective_io_concurrency=200
       -c work_mem=2MB
-      -c min_wal_size=1GB
-      -c max_wal_size=4GB
+      -c min_wal_size=512MB
+      -c max_wal_size=2GB
       -c max_connections=200
-      -c lock_timeout=5s
-      -c statement_timeout=30s
-      -c log_lock_waits=on
+      -c max_prepared_transactions=200
+      -c shared_preload_libraries='pg_stat_statements'
+      -c wal_level=replica
+      -c max_wal_senders=3
+      -c max_replication_slots=3
+      -c hot_standby=on
+      -c hot_standby_feedback=on
       -c log_statement=none
       -c log_duration=off
-      -c log_min_duration_statement=1000
+      -c log_min_duration_statement=5000
+      -c log_checkpoints=on
+      -c log_connections=off
+      -c log_disconnections=off
+      -c log_lock_waits=on
+      -c deadlock_timeout=1s
+      -c lock_timeout=10s
+      -c statement_timeout=60s
+      -c idle_in_transaction_session_timeout=300s
+      -c tcp_keepalives_idle=600
+      -c tcp_keepalives_interval=30
+      -c tcp_keepalives_count=3
+      -c fsync=on
+      -c synchronous_commit=off
+      -c wal_compression=on
+      -c wal_writer_delay=200ms
+      -c checkpoint_timeout=15min
+      -c checkpoint_flush_after=256kB
+      -c bgwriter_delay=200ms
+      -c bgwriter_lru_maxpages=100
+      -c bgwriter_lru_multiplier=2.0
+      -c bgwriter_flush_after=512kB
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+      - ./postgresql.conf:/etc/postgresql/postgresql.conf
     networks:
       - rinha-network
     deploy:
       resources:
         limits:
-          cpus: '0.2'
-          memory: 100MB
+          cpus: '0.6'
+          memory: 140MB
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d payments"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
 
   # Redis Cache
   redis:
     image: redis:7-alpine
+    command: redis-server --maxmemory 16mb --maxmemory-policy allkeys-lru --save ""
     ports:
       - "6379:6379"
     networks:
@@ -51,7 +84,7 @@ services:
       resources:
         limits:
           cpus: '0.1'
-          memory: 50MB
+          memory: 20MB
 
   # API Instance 1
   api1:
@@ -78,8 +111,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '0.5'
-          memory: 200MB
+          cpus: '0.4'
+          memory: 85MB
 
   # API Instance 2
   api2:
@@ -91,12 +124,12 @@ services:
       - DB_USER=postgres
       - DB_PASSWORD=postgres
       - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - SERVER_PORT=9999
       - WORKER_COUNT=30
       - QUEUE_BUFFER_SIZE=15000
       - PAYMENT_PROCESSOR_URL_DEFAULT=http://payment-processor-default:8080
       - PAYMENT_PROCESSOR_URL_FALLBACK=http://payment-processor-fallback:8080
-      - PAYMENT_PROCESSOR_DEFAULT_URL=http://payment-processor-default:8080
-      - PAYMENT_PROCESSOR_FALLBACK_URL=http://payment-processor-fallback:8080
     depends_on:
       - postgres
       - redis
@@ -106,8 +139,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '0.5'
-          memory: 200MB
+          cpus: '0.4'
+          memory: 85MB
 
   # Nginx Load Balancer
   nginx:
@@ -124,8 +157,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '0.2'
-          memory: 100MB
+          cpus: '0.1'
+          memory: 15MB
 
 volumes:
   postgres_data:

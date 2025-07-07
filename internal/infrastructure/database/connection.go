@@ -29,10 +29,11 @@ func NewConnection(config *DatabaseConfig) (*sql.DB, error) {
 		return nil, fmt.Errorf("erro ao abrir conexão com o banco de dados: %w", err)
 	}
 
-	// Configure connection pool for high performance
-	db.SetMaxOpenConns(50)                  // Increased from 25
-	db.SetMaxIdleConns(25)                  // Keep more idle connections
-	db.SetConnMaxLifetime(10 * time.Minute) // Increased lifetime
+	// Configure connection pool for resource-constrained environment
+	db.SetMaxOpenConns(50)                  // Reduced for memory constraints
+	db.SetMaxIdleConns(25)                  // Keep fewer idle connections
+	db.SetConnMaxLifetime(15 * time.Minute) // Shorter lifetime
+	db.SetConnMaxIdleTime(3 * time.Minute)  // Close idle connections sooner
 
 	// Test connection
 	if err := db.Ping(); err != nil {
