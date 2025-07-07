@@ -11,6 +11,12 @@ type PaymentProcessorService interface {
 	// ProcessPayment processes a payment through the appropriate processor
 	ProcessPayment(ctx context.Context, payment *entities.Payment) (entities.ProcessorType, error)
 
+	// ProcessWithDefault processes a payment specifically with the default processor
+	ProcessWithDefault(ctx context.Context, payment *entities.Payment) error
+
+	// ProcessWithFallback processes a payment specifically with the fallback processor
+	ProcessWithFallback(ctx context.Context, payment *entities.Payment) error
+
 	// GetHealthStatus returns the health status of processors
 	GetHealthStatus(ctx context.Context) (*ProcessorHealthStatus, error)
 

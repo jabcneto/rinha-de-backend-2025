@@ -2,6 +2,7 @@ package repositories
 
 import (
 	"context"
+	"time"
 
 	"rinha-backend-clean/internal/domain/entities"
 
@@ -30,4 +31,13 @@ type PaymentRepository interface {
 
 	// GetSummaryFromCache returns cached summary data (non-blocking)
 	GetSummaryFromCache(ctx context.Context) (*entities.PaymentSummary, error)
+
+	// GetPaymentsForRetry retrieves payments that are eligible for retry
+	GetPaymentsForRetry(ctx context.Context, limit int) ([]*entities.Payment, error)
+
+	// UpdateRetryInfo updates retry-related information for a payment
+	UpdateRetryInfo(ctx context.Context, paymentID uuid.UUID, retryCount int, nextRetryAt *time.Time, lastError string) error
+
+	// MarkPaymentAsFailed marks a payment as permanently failed
+	MarkPaymentAsFailed(ctx context.Context, paymentID uuid.UUID, lastError string) error
 }

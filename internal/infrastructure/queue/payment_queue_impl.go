@@ -12,13 +12,14 @@ import (
 
 // PaymentQueueImpl implements the QueueService interface
 type PaymentQueueImpl struct {
-	queue       chan *entities.Payment
-	workerCount int
-	workers     []chan struct{}
-	wg          sync.WaitGroup
-	ctx         context.Context
-	cancel      context.CancelFunc
-	mutex       sync.RWMutex
+	queue             chan *entities.Payment
+	workerCount       int
+	workers           []chan struct{}
+	wg                sync.WaitGroup
+	ctx               context.Context
+	cancel            context.CancelFunc
+	mutex             sync.RWMutex
+	retryQueueService services.RetryQueueService
 }
 
 // NewPaymentQueue creates a new payment queue service
@@ -32,6 +33,13 @@ func NewPaymentQueue(bufferSize, workerCount int) services.QueueService {
 		ctx:         ctx,
 		cancel:      cancel,
 	}
+}
+
+// SetRetryQueueService sets the retry queue service for handling failed payments
+func (q *PaymentQueueImpl) SetRetryQueueService(retryQueueService services.RetryQueueService) {
+	q.mutex.Lock()
+	defer q.mutex.Unlock()
+	q.retryQueueService = retryQueueService
 }
 
 // Enqueue adds a payment to the processing queue
@@ -93,8 +101,34 @@ func (q *PaymentQueueImpl) processPayment(payment *entities.Payment, processor s
 	if err != nil {
 		log.Printf("Erro ao processar pagamento %s: %v", payment.CorrelationID, err)
 
-		// Mark payment as failed and try to update
-		payment.MarkAsFailed()
+		// Instead of marking as failed immediately, try to enqueue for retry
+		q.mutex.RLock()
+		retryService := q.retryQueueService
+		q.mutex.RUnlock()
+
+		if retryService != nil {
+			// Mark for retry with exponential backoff
+			if payment.MarkForRetry(err, 2) { // Max 2 retries for initial processing
+				// Enqueue for default processor retry
+				if retryErr := retryService.EnqueueForDefaultRetry(ctx, payment); retryErr != nil {
+					log.Printf("Erro ao enfileirar pagamento %s para retry: %v", payment.CorrelationID, retryErr)
+					// If can't enqueue for retry, mark as failed
+					payment.MarkAsFailed()
+				} else {
+					log.Printf("Pagamento %s enfileirado para retry (tentativa %d)", payment.CorrelationID, payment.RetryCount)
+				}
+			} else {
+				// Exceeded max retries, mark as failed
+				payment.MarkAsFailed()
+				log.Printf("Pagamento %s marcado como failed após exceder tentativas", payment.CorrelationID)
+			}
+		} else {
+			// No retry service available, mark as failed
+			payment.MarkAsFailed()
+			log.Printf("Pagamento %s marcado como failed (sem retry service)", payment.CorrelationID)
+		}
+
+		// Update payment in database
 		if updateErr := repository.Update(ctx, payment); updateErr != nil {
 			log.Printf("Erro ao atualizar status do pagamento %s: %v", payment.CorrelationID, updateErr)
 		}

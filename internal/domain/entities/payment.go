@@ -17,6 +17,10 @@ type Payment struct {
 	ProcessedAt   *time.Time
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
+	// Retry control fields
+	RetryCount  int
+	NextRetryAt *time.Time
+	LastError   string
 }
 
 // PaymentStatus represents the status of a payment
@@ -25,6 +29,7 @@ type PaymentStatus string
 const (
 	PaymentStatusPending   PaymentStatus = "pending"
 	PaymentStatusProcessed PaymentStatus = "processed"
+	PaymentStatusCompleted PaymentStatus = "completed"
 	PaymentStatusFailed    PaymentStatus = "failed"
 )
 
@@ -68,4 +73,35 @@ func (p *Payment) MarkAsFailed() {
 // IsValid validates the payment entity
 func (p *Payment) IsValid() bool {
 	return p.CorrelationID != uuid.Nil && p.Amount > 0
+}
+
+// MarkForRetry marks the payment for retry with exponential backoff
+func (p *Payment) MarkForRetry(err error, maxRetries int) bool {
+	p.RetryCount++
+	p.LastError = err.Error()
+	p.UpdatedAt = time.Now()
+
+	if p.RetryCount > maxRetries {
+		p.MarkAsFailed()
+		return false
+	}
+
+	// Exponential backoff: 2^retryCount seconds
+	backoffSeconds := 1 << p.RetryCount // 2, 4, 8, 16, 32 seconds
+	nextRetry := time.Now().Add(time.Duration(backoffSeconds) * time.Second)
+	p.NextRetryAt = &nextRetry
+
+	return true
+}
+
+// IsReadyForRetry checks if the payment is ready for retry
+func (p *Payment) IsReadyForRetry() bool {
+	return p.NextRetryAt != nil && time.Now().After(*p.NextRetryAt)
+}
+
+// ResetRetryInfo resets retry information when payment is successful
+func (p *Payment) ResetRetryInfo() {
+	p.RetryCount = 0
+	p.NextRetryAt = nil
+	p.LastError = ""
 }

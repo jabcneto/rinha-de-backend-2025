@@ -37,6 +37,13 @@ func main() {
 	// Initialize services
 	paymentProcessor := external.NewPaymentProcessorClient()
 	queueService := queue.NewPaymentQueue(config.Queue.BufferSize, config.Queue.WorkerCount)
+	retryQueueService := queue.NewRetryQueue(config.Queue.BufferSize, config.Queue.WorkerCount)
+
+	// Connect retry queue service to main queue service
+	queueService.SetRetryQueueService(retryQueueService)
+
+	// Initialize auto-scaler
+	autoScaler := queue.NewAutoScaler(queueService, retryQueueService, paymentProcessor, paymentRepo)
 
 	// Initialize use cases
 	processPaymentUC := usecases.NewProcessPaymentUseCase(paymentRepo, queueService)
@@ -45,7 +52,7 @@ func main() {
 
 	// Initialize handlers
 	paymentHandler := handlers.NewPaymentHandler(processPaymentUC, getPaymentSummaryUC, purgePaymentsUC)
-	healthHandler := handlers.NewHealthHandler(queueService)
+	healthHandler := handlers.NewHealthHandler(queueService, retryQueueService, autoScaler)
 
 	// Initialize router
 	router := httpInterface.NewRouter(paymentHandler, healthHandler)
@@ -62,6 +69,14 @@ func main() {
 	if err := queueService.StartProcessing(ctx, paymentProcessor, paymentRepo); err != nil {
 		log.Fatalf("Erro ao iniciar processamento da fila: %v", err)
 	}
+
+	// Start retry queue processing
+	if err := retryQueueService.StartRetryProcessing(paymentProcessor, paymentRepo); err != nil {
+		log.Fatalf("Erro ao iniciar processamento da fila de retry: %v", err)
+	}
+
+	// Start auto-scaler
+	autoScaler.Start()
 
 	// Setup HTTP server
 	server := &http.Server{
@@ -101,6 +116,11 @@ func main() {
 		log.Printf("Erro ao parar processamento da fila: %v", err)
 	}
 
+	// Stop retry queue processing
+	if err := retryQueueService.Stop(); err != nil {
+		log.Printf("Erro ao parar processamento da fila de retry: %v", err)
+	}
+
 	// Cancel background services
 	cancel()
 
@@ -127,12 +147,6 @@ type QueueConfig struct {
 
 // loadConfig loads configuration from environment variables
 func loadConfig() *Config {
-	// Parse database URL
-	databaseURL := os.Getenv("DATABASE_URL")
-	if databaseURL == "" {
-		databaseURL = "host=localhost user=postgres password=postgres dbname=rinha_db sslmode=disable"
-	}
-
 	// Parse server port
 	port := 9999
 	if portStr := os.Getenv("PORT"); portStr != "" {
@@ -140,37 +154,64 @@ func loadConfig() *Config {
 			port = p
 		}
 	}
+	if portStr := os.Getenv("SERVER_PORT"); portStr != "" {
+		if p, err := strconv.Atoi(portStr); err == nil {
+			port = p
+		}
+	}
 
 	// Parse queue configuration
-	bufferSize := 10000
+	bufferSize := 10000 // Aumentado de 1000 para 10000
+	workerCount := 20   // Aumentado de 5 para 20
 	if bufferStr := os.Getenv("QUEUE_BUFFER_SIZE"); bufferStr != "" {
 		if b, err := strconv.Atoi(bufferStr); err == nil {
 			bufferSize = b
 		}
 	}
 
-	workerCount := 5
-	if workerStr := os.Getenv("QUEUE_WORKER_COUNT"); workerStr != "" {
-		if w, err := strconv.Atoi(workerStr); err == nil {
-			workerCount = w
+	if w, err := strconv.Atoi(os.Getenv("WORKER_COUNT")); err == nil && w > 0 {
+		if w > 50 { // Limite máximo
+			w = 50
+		}
+		workerCount = w
+	}
+
+	// Parse database configuration from environment variables
+	dbHost := getEnvOrDefault("DB_HOST", "localhost")
+	dbPort := 5432
+	if portStr := os.Getenv("DB_PORT"); portStr != "" {
+		if p, err := strconv.Atoi(portStr); err == nil {
+			dbPort = p
 		}
 	}
+	dbUser := getEnvOrDefault("DB_USER", "postgres")
+	dbPassword := getEnvOrDefault("DB_PASSWORD", "postgres")
+	dbName := getEnvOrDefault("DB_NAME", "payments")
+	sslMode := getEnvOrDefault("SSL_MODE", "disable")
 
 	return &Config{
 		Server: ServerConfig{
 			Port: port,
 		},
 		Database: &database.DatabaseConfig{
-			Host:     "db",
-			Port:     5432,
-			User:     "postgres",
-			Password: "postgres",
-			DBName:   "rinha_db",
-			SSLMode:  "disable",
+			Host:     dbHost,
+			Port:     dbPort,
+			User:     dbUser,
+			Password: dbPassword,
+			DBName:   dbName,
+			SSLMode:  sslMode,
 		},
 		Queue: QueueConfig{
 			BufferSize:  bufferSize,
 			WorkerCount: workerCount,
 		},
 	}
+}
+
+// getEnvOrDefault returns environment variable value or default if not set
+func getEnvOrDefault(key, defaultValue string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return defaultValue
 }

@@ -14,6 +14,9 @@ type QueueService interface {
 	// StartProcessing starts the background payment processing
 	StartProcessing(ctx context.Context, processor PaymentProcessorService, repository PaymentRepository) error
 
+	// SetRetryQueueService sets the retry queue service for handling failed payments
+	SetRetryQueueService(retryQueueService RetryQueueService)
+
 	// GetQueueSize returns the current queue size
 	GetQueueSize() int
 

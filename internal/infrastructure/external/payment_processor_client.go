@@ -58,9 +58,9 @@ type HealthCheckResponse struct {
 const (
 	HealthCheckPath            = "/payments/service-health"
 	PaymentsPath               = "/payments"
-	HealthCheckInterval        = 30 * time.Second // Aumentado de 5s para 30s
-	CircuitBreakerMaxFailures  = 3
-	CircuitBreakerResetTimeout = 10 * time.Second
+	HealthCheckInterval        = 15 * time.Second
+	CircuitBreakerMaxFailures  = 5
+	CircuitBreakerResetTimeout = 5 * time.Second
 )
 
 // NewPaymentProcessorClient creates a new payment processor client
@@ -76,8 +76,25 @@ func NewPaymentProcessorClient() services.PaymentProcessorService {
 		fallbackURL = "http://payment-processor-fallback:8080"
 	}
 
+	// Create optimized HTTP client with connection pooling
+	transport := &http.Transport{
+		MaxIdleConns:          100,              // Pool de conexões idle
+		MaxIdleConnsPerHost:   50,               // Por host
+		MaxConnsPerHost:       100,              // Máximo de conexões por host
+		IdleConnTimeout:       90 * time.Second, // Timeout para conexões idle
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+		DisableKeepAlives:     false, // Manter conexões vivas
+		DisableCompression:    true,  // Desabilitar compressão para performance
+	}
+
+	client := &http.Client{
+		Timeout:   3 * time.Second, // Reduzido de 5s para 3s
+		Transport: transport,
+	}
+
 	return &PaymentProcessorClient{
-		client: &http.Client{Timeout: 5 * time.Second},
+		client: client,
 		defaultProcessor: struct {
 			url             string
 			isFailing       bool
@@ -131,6 +148,32 @@ func (c *PaymentProcessorClient) ProcessPayment(ctx context.Context, payment *en
 	}
 
 	return "", fmt.Errorf("falha ao enviar pagamento para ambos os processadores: %w", err)
+}
+
+// ProcessWithDefault processes a payment specifically with the default processor
+func (c *PaymentProcessorClient) ProcessWithDefault(ctx context.Context, payment *entities.Payment) error {
+	request := &PaymentProcessorRequest{
+		CorrelationID: payment.CorrelationID.String(),
+		Amount:        payment.Amount,
+		RequestedAt:   payment.RequestedAt,
+	}
+
+	return c.defaultProcessor.circuitBreaker.Execute(func() error {
+		return c.sendPaymentToURL(ctx, c.defaultProcessor.url, request)
+	})
+}
+
+// ProcessWithFallback processes a payment specifically with the fallback processor
+func (c *PaymentProcessorClient) ProcessWithFallback(ctx context.Context, payment *entities.Payment) error {
+	request := &PaymentProcessorRequest{
+		CorrelationID: payment.CorrelationID.String(),
+		Amount:        payment.Amount,
+		RequestedAt:   payment.RequestedAt,
+	}
+
+	return c.fallbackProcessor.circuitBreaker.Execute(func() error {
+		return c.sendPaymentToURL(ctx, c.fallbackProcessor.url, request)
+	})
 }
 
 // sendPaymentToURL sends payment to a specific processor URL

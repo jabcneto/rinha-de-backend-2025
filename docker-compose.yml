@@ -1,20 +1,44 @@
-version: '3.8'
-
 services:
   # PostgreSQL Database
   postgres:
-    image: postgres:15-alpine
+    image: postgres:17-alpine
     environment:
       POSTGRES_DB: payments
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
+      POSTGRES_INITDB_ARGS: "--data-checksums"
+    command: >
+      postgres
+      -c shared_buffers=64MB
+      -c effective_cache_size=128MB
+      -c maintenance_work_mem=16MB
+      -c checkpoint_completion_target=0.9
+      -c wal_buffers=16MB
+      -c default_statistics_target=100
+      -c random_page_cost=1.1
+      -c effective_io_concurrency=200
+      -c work_mem=2MB
+      -c min_wal_size=1GB
+      -c max_wal_size=4GB
+      -c max_connections=200
+      -c lock_timeout=5s
+      -c statement_timeout=30s
+      -c log_lock_waits=on
+      -c log_statement=none
+      -c log_duration=off
+      -c log_min_duration_statement=1000
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ../init.sql:/docker-entrypoint-initdb.d/init.sql
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
     networks:
       - rinha-network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.2'
+          memory: 100MB
 
   # Redis Cache
   redis:
@@ -23,6 +47,11 @@ services:
       - "6379:6379"
     networks:
       - rinha-network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.1'
+          memory: 50MB
 
   # API Instance 1
   api1:
@@ -36,16 +65,21 @@ services:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - SERVER_PORT=9999
+      - WORKER_COUNT=30
+      - QUEUE_BUFFER_SIZE=15000
+      - PAYMENT_PROCESSOR_URL_DEFAULT=http://payment-processor-default:8080
+      - PAYMENT_PROCESSOR_URL_FALLBACK=http://payment-processor-fallback:8080
     depends_on:
       - postgres
       - redis
     networks:
       - rinha-network
+      - payment-processor
     deploy:
       resources:
         limits:
-          cpus: '0.6'
-          memory: 200M
+          cpus: '0.5'
+          memory: 200MB
 
   # API Instance 2
   api2:
@@ -57,18 +91,23 @@ services:
       - DB_USER=postgres
       - DB_PASSWORD=postgres
       - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - SERVER_PORT=9999
+      - WORKER_COUNT=30
+      - QUEUE_BUFFER_SIZE=15000
+      - PAYMENT_PROCESSOR_URL_DEFAULT=http://payment-processor-default:8080
+      - PAYMENT_PROCESSOR_URL_FALLBACK=http://payment-processor-fallback:8080
+      - PAYMENT_PROCESSOR_DEFAULT_URL=http://payment-processor-default:8080
+      - PAYMENT_PROCESSOR_FALLBACK_URL=http://payment-processor-fallback:8080
     depends_on:
       - postgres
       - redis
     networks:
       - rinha-network
+      - payment-processor
     deploy:
       resources:
         limits:
-          cpus: '0.6'
-          memory: 200M
+          cpus: '0.5'
+          memory: 200MB
 
   # Nginx Load Balancer
   nginx:
@@ -85,8 +124,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '0.3'
-          memory: 100M
+          cpus: '0.2'
+          memory: 100MB
 
 volumes:
   postgres_data:
@@ -94,3 +133,5 @@ volumes:
 networks:
   rinha-network:
     driver: bridge
+  payment-processor:
+    external: true

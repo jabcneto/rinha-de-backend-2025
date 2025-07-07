@@ -35,8 +35,9 @@ func (rt *Router) SetupRoutes() *mux.Router {
 	r.HandleFunc("/payments-summary", rt.paymentHandler.HandlePaymentsSummary).Methods("GET")
 	r.HandleFunc("/purge-payments", rt.paymentHandler.HandlePurgePayments).Methods("POST")
 
-	// Health check route
+	// Health check routes
 	r.HandleFunc("/health", rt.healthHandler.HandleHealth).Methods("GET")
+	r.HandleFunc("/scaling-metrics", rt.healthHandler.HandleScalingMetrics).Methods("GET")
 
 	return r
 }
