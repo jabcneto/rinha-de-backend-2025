@@ -1,8 +1,8 @@
 package middleware
 
 import (
-	"log"
 	"net/http"
+	"rinha-backend-clean/internal/infrastructure/logger"
 	"time"
 )
 
@@ -17,9 +17,16 @@ func LoggingMiddleware(next http.Handler) http.Handler {
 		// Call the next handler
 		next.ServeHTTP(wrapper, r)
 
-		// Log the request
+		// Log the request using structured logging
 		duration := time.Since(start)
-		log.Printf("%s %s %d %v", r.Method, r.URL.Path, wrapper.statusCode, duration)
+		clientIP := r.RemoteAddr
+		if forwarded := r.Header.Get("X-Forwarded-For"); forwarded != "" {
+			clientIP = forwarded
+		} else if realIP := r.Header.Get("X-Real-IP"); realIP != "" {
+			clientIP = realIP
+		}
+
+		logger.LogHTTPRequest(r.Method, r.URL.Path, wrapper.statusCode, duration.String(), clientIP)
 	})
 }
 

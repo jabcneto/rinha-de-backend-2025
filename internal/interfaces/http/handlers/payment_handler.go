@@ -9,6 +9,7 @@ import (
 
 	"rinha-backend-clean/internal/application/dtos"
 	"rinha-backend-clean/internal/application/usecases"
+	"rinha-backend-clean/internal/infrastructure/logger"
 )
 
 // PaymentHandler handles payment-related HTTP requests
@@ -37,6 +38,9 @@ func (h *PaymentHandler) HandlePayments(w http.ResponseWriter, r *http.Request) 
 
 	// Parse JSON request
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		logger.WithField("error", err.Error()).
+			WithField("path", r.URL.Path).
+			Warn("Invalid JSON in payment request")
 		h.writeErrorResponse(w, "Invalid JSON", http.StatusBadRequest)
 		return
 	}
@@ -46,14 +50,24 @@ func (h *PaymentHandler) HandlePayments(w http.ResponseWriter, r *http.Request) 
 	if err != nil {
 		var validationErr *dtos.ValidationError
 		if errors.As(err, &validationErr) {
+			logger.WithField("validation_error", validationErr.Message).
+				WithField("payment_id", req.CorrelationID).
+				Warn("Payment validation failed")
 			h.writeErrorResponse(w, validationErr.Message, http.StatusBadRequest)
 			return
 		}
+
+		logger.WithError(err).
+			WithField("payment_id", req.CorrelationID).
+			Error("Failed to process payment")
 		h.writeErrorResponse(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
 
 	// Return success response
+	logger.WithField("payment_id", req.CorrelationID).
+		WithField("status", "accepted").
+		Info("Payment request accepted")
 	h.writeJSONResponse(w, response, http.StatusAccepted)
 }
 
@@ -64,6 +78,9 @@ func (h *PaymentHandler) HandlePaymentsSummary(w http.ResponseWriter, r *http.Re
 
 	if fromStr := r.URL.Query().Get("from"); fromStr != "" {
 		if parsed, err := h.parseTimestamp(fromStr); err != nil {
+			logger.WithField("timestamp", fromStr).
+				WithField("error", err.Error()).
+				Warn("Invalid 'from' timestamp format")
 			h.writeErrorResponse(w, "Invalid 'from' timestamp format. Use yyyy-MM-ddTHH:mm:ss or ISO format.", http.StatusBadRequest)
 			return
 		} else {
@@ -73,6 +90,9 @@ func (h *PaymentHandler) HandlePaymentsSummary(w http.ResponseWriter, r *http.Re
 
 	if toStr := r.URL.Query().Get("to"); toStr != "" {
 		if parsed, err := h.parseTimestamp(toStr); err != nil {
+			logger.WithField("timestamp", toStr).
+				WithField("error", err.Error()).
+				Warn("Invalid 'to' timestamp format")
 			h.writeErrorResponse(w, "Invalid 'to' timestamp format. Use yyyy-MM-ddTHH:mm:ss or ISO format.", http.StatusBadRequest)
 			return
 		} else {
@@ -83,11 +103,13 @@ func (h *PaymentHandler) HandlePaymentsSummary(w http.ResponseWriter, r *http.Re
 	// Execute use case (optimized with cache)
 	response, err := h.getPaymentSummaryUC.Execute(r.Context(), req)
 	if err != nil {
+		logger.WithError(err).Error("Failed to get payment summary")
 		h.writeErrorResponse(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
 
 	// Return JSON response
+	logger.Debug("Payment summary retrieved successfully")
 	h.writeJSONResponse(w, response, http.StatusOK)
 }
 
@@ -95,11 +117,13 @@ func (h *PaymentHandler) HandlePaymentsSummary(w http.ResponseWriter, r *http.Re
 func (h *PaymentHandler) HandlePurgePayments(w http.ResponseWriter, r *http.Request) {
 	// Execute use case
 	if err := h.purgePaymentsUC.Execute(r.Context()); err != nil {
+		logger.WithError(err).Error("Failed to purge payments")
 		h.writeErrorResponse(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
 
 	// Return success response
+	logger.Info("All payments purged successfully")
 	response := map[string]string{"message": "All payments purged."}
 	h.writeJSONResponse(w, response, http.StatusOK)
 }

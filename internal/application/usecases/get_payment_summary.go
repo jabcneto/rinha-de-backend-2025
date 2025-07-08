@@ -2,7 +2,7 @@ package usecases
 
 import (
 	"context"
-	"log"
+	"rinha-backend-clean/internal/infrastructure/logger"
 
 	"rinha-backend-clean/internal/application/dtos"
 	"rinha-backend-clean/internal/domain/entities"
@@ -30,10 +30,10 @@ func (uc *GetPaymentSummaryUseCase) Execute(ctx context.Context, req *dtos.Payme
 	}
 
 	if req.From != nil || req.To != nil {
-		log.Printf("Filtros de data detectados, consultando banco de dados diretamente")
+		logger.GetLogger().Info("Filtros de data detectados, consultando banco de dados diretamente")
 		summary, err := uc.paymentRepo.GetSummary(ctx, filter)
 		if err != nil {
-			log.Printf("Erro ao obter resumo de pagamentos com filtros: %v", err)
+			logger.GetLogger().Errorf("Erro ao obter resumo de pagamentos com filtros: %v", err)
 			return nil, err
 		}
 
@@ -54,10 +54,10 @@ func (uc *GetPaymentSummaryUseCase) Execute(ctx context.Context, req *dtos.Payme
 	summary, err := uc.paymentRepo.GetSummaryFromCache(ctx)
 	if err != nil {
 		// If cache fails, fallback to database (may block)
-		log.Printf("Cache miss, consultando banco de dados: %v", err)
+		logger.GetLogger().Warnf("Cache miss, consultando banco de dados: %v", err)
 		summary, err = uc.paymentRepo.GetSummary(ctx, filter)
 		if err != nil {
-			log.Printf("Erro ao obter resumo de pagamentos: %v", err)
+			logger.GetLogger().Errorf("Erro ao obter resumo de pagamentos: %v", err)
 			return nil, err
 		}
 	}
@@ -74,7 +74,7 @@ func (uc *GetPaymentSummaryUseCase) Execute(ctx context.Context, req *dtos.Payme
 		},
 	}
 
-	log.Printf("Resumo de pagamentos retornado - Default: %d req / R$ %.2f, Fallback: %d req / R$ %.2f",
+	logger.GetLogger().Infof("Resumo de pagamentos retornado - Default: %d req / R$ %.2f, Fallback: %d req / R$ %.2f",
 		response.Default.TotalRequests, response.Default.TotalAmount,
 		response.Fallback.TotalRequests, response.Fallback.TotalAmount)
 

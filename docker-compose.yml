@@ -1,5 +1,4 @@
 services:
-  # PostgreSQL Database - Otimizado para usar menos recursos
   postgres:
     image: postgres:17-alpine
     environment:
@@ -72,7 +71,6 @@ services:
       retries: 3
     restart: unless-stopped
 
-  # API Instance 1 - Otimizada (recursos redistribuídos)
   api1:
     build: .
     environment:
@@ -86,6 +84,8 @@ services:
       - QUEUE_BUFFER_SIZE=12000
       - PAYMENT_PROCESSOR_URL_DEFAULT=http://payment-processor-default:8080
       - PAYMENT_PROCESSOR_URL_FALLBACK=http://payment-processor-fallback:8080
+      - LOG_LEVEL=error
+      - LOG_FORMAT=text
     depends_on:
       - postgres
     networks:
@@ -97,7 +97,6 @@ services:
           cpus: '0.4'
           memory: 90MB
 
-  # API Instance 2 - Otimizada (recursos redistribuídos)
   api2:
     build: .
     environment:
@@ -111,6 +110,8 @@ services:
       - QUEUE_BUFFER_SIZE=12000
       - PAYMENT_PROCESSOR_URL_DEFAULT=http://payment-processor-default:8080
       - PAYMENT_PROCESSOR_URL_FALLBACK=http://payment-processor-fallback:8080
+      - LOG_LEVEL=error
+      - LOG_FORMAT=text
     depends_on:
       - postgres
     networks:
@@ -122,7 +123,6 @@ services:
           cpus: '0.4'
           memory: 90MB
 
-  # Nginx Load Balancer - Otimizado (recursos redistribuídos)
   nginx:
     image: nginx:alpine
     ports:

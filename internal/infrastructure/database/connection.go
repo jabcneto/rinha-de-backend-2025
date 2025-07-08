@@ -3,10 +3,10 @@ package database
 import (
 	"database/sql"
 	"fmt"
-	"log"
 	"time"
 
 	_ "github.com/lib/pq"
+	"rinha-backend-clean/internal/infrastructure/logger"
 )
 
 // DatabaseConfig holds database configuration
@@ -31,26 +31,26 @@ func NewConnection(config *DatabaseConfig) (*sql.DB, error) {
 	maxRetries := 30
 	retryDelay := 2 * time.Second
 
-	log.Printf("Tentando conectar ao banco de dados em %s:%d...", config.Host, config.Port)
+	logger.Infof("Tentando conectar ao banco de dados em %s:%d...", config.Host, config.Port)
 
 	for i := 0; i < maxRetries; i++ {
 		db, err = sql.Open("postgres", dsn)
 		if err != nil {
-			log.Printf("Tentativa %d/%d: erro ao abrir conexão: %v", i+1, maxRetries, err)
+			logger.Warnf("Tentativa %d/%d: erro ao abrir conexão: %v", i+1, maxRetries, err)
 			time.Sleep(retryDelay)
 			continue
 		}
 
 		// Test connection with timeout
 		if err := db.Ping(); err != nil {
-			log.Printf("Tentativa %d/%d: erro ao conectar: %v", i+1, maxRetries, err)
+			logger.Warnf("Tentativa %d/%d: erro ao conectar: %v", i+1, maxRetries, err)
 			db.Close()
 			time.Sleep(retryDelay)
 			continue
 		}
 
 		// Connection successful
-		log.Println("Conexão com o banco de dados estabelecida com sucesso!")
+		logger.Info("Conexão com o banco de dados estabelecida com sucesso!")
 		break
 	}
 

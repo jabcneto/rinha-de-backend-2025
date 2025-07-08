@@ -2,9 +2,9 @@ package usecases
 
 import (
 	"context"
-	"log"
 
 	"rinha-backend-clean/internal/domain/repositories"
+	"rinha-backend-clean/internal/infrastructure/logger"
 )
 
 // PurgePaymentsUseCase handles payment data purging
@@ -23,10 +23,10 @@ func NewPurgePaymentsUseCase(paymentRepo repositories.PaymentRepository) *PurgeP
 func (uc *PurgePaymentsUseCase) Execute(ctx context.Context) error {
 	err := uc.paymentRepo.PurgeSummary(ctx)
 	if err != nil {
-		log.Printf("Erro ao limpar dados de pagamentos: %v", err)
+		logger.Errorf("Erro ao limpar dados de pagamentos: %v", err)
 		return err
 	}
 
-	log.Println("Dados de pagamentos limpos com sucesso")
+	logger.Info("Dados de pagamentos limpos com sucesso")
 	return nil
 }

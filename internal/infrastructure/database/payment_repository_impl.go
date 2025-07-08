@@ -4,12 +4,12 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"log"
 	"sync"
 	"time"
 
 	"rinha-backend-clean/internal/domain/entities"
 	"rinha-backend-clean/internal/domain/repositories"
+	"rinha-backend-clean/internal/infrastructure/logger"
 
 	"github.com/google/uuid"
 	_ "github.com/lib/pq"
@@ -316,7 +316,7 @@ func (r *PaymentRepositoryImpl) flushBatch(processorType entities.ProcessorType)
 
 	_, err := r.db.ExecContext(ctx, query, requests, amount, string(processorType))
 	if err != nil {
-		log.Printf("Erro ao atualizar resumo do pagamento em batch para %s: %v", processorType, err)
+		logger.Errorf("Erro ao atualizar resumo do pagamento em batch para %s: %v", processorType, err)
 
 		// Re-add to batch buffer if update failed
 		r.batchMutex.Lock()
@@ -368,7 +368,7 @@ func (r *PaymentRepositoryImpl) startCacheRefresh() {
 
 		summary, err := r.GetSummary(ctx, nil)
 		if err != nil {
-			log.Printf("Erro ao atualizar cache: %v", err)
+			logger.Warnf("Erro ao atualizar cache: %v", err)
 			cancel()
 			continue
 		}
@@ -401,7 +401,7 @@ func (r *PaymentRepositoryImpl) startBatchUpdate() {
 
 			_, err := r.db.ExecContext(context.Background(), query, batch.TotalRequests, batch.TotalAmount, string(processorType))
 			if err != nil {
-				log.Printf("Erro ao atualizar resumo do pagamento em batch para %s: %v", processorType, err)
+				logger.Errorf("Erro ao atualizar resumo do pagamento em batch para %s: %v", processorType, err)
 				continue
 			}
 

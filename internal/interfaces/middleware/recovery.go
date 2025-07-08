@@ -1,24 +1,25 @@
 package middleware
 
 import (
-	"encoding/json"
-	"log"
 	"net/http"
+	"rinha-backend-clean/internal/infrastructure/logger"
 	"runtime/debug"
 )
 
-// RecoveryMiddleware recovers from panics and returns a 500 error
+// RecoveryMiddleware recovers from panics and logs them
 func RecoveryMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
 			if err := recover(); err != nil {
-				log.Printf("Panic recovered: %v\n%s", err, debug.Stack())
+				// Log the panic with stack trace
+				logger.WithField("stack", string(debug.Stack())).
+					WithField("panic", err).
+					WithField("method", r.Method).
+					WithField("path", r.URL.Path).
+					Error("Panic recovered in HTTP handler")
 
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusInternalServerError)
-				json.NewEncoder(w).Encode(map[string]string{
-					"error": "Internal server error",
-				})
+				// Return 500 status
+				http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 			}
 		}()
 

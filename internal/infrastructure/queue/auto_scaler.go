@@ -2,11 +2,10 @@ package queue
 
 import (
 	"context"
-	"log"
+	"rinha-backend-clean/internal/domain/services"
+	"rinha-backend-clean/internal/infrastructure/logger"
 	"sync"
 	"time"
-
-	"rinha-backend-clean/internal/domain/services"
 )
 
 // AutoScaler handles dynamic worker scaling based on queue load
@@ -27,6 +26,8 @@ type AutoScaler struct {
 	// Worker management
 	activeWorkers []context.CancelFunc
 	workerMutex   sync.RWMutex
+	running       bool
+	wg            sync.WaitGroup
 
 	// Metrics
 	metrics *ScalingMetrics
@@ -75,8 +76,9 @@ func NewAutoScaler(
 
 // Start begins the auto-scaling monitoring
 func (as *AutoScaler) Start() {
-	log.Printf("🚀 Auto-scaler iniciado: %d-%d workers, verificação a cada %v",
-		as.minWorkers, as.maxWorkers, as.checkInterval)
+	logger.Info("🚀 Auto-scaler iniciado", "minWorkers", as.minWorkers, "maxWorkers", as.maxWorkers, "checkInterval", as.checkInterval)
+
+	as.running = true
 
 	// Start initial workers
 	as.scaleToWorkers(as.currentWorkers)
@@ -85,22 +87,33 @@ func (as *AutoScaler) Start() {
 	go as.monitorAndScale()
 }
 
-// Stop stops the auto-scaler and all workers
+// Stop stops the auto-scaler
 func (as *AutoScaler) Stop() {
-	log.Println("🛑 Parando auto-scaler...")
-	as.cancel()
+	logger.Info("🛑 Parando auto-scaler...")
 
 	as.workerMutex.Lock()
 	defer as.workerMutex.Unlock()
 
-	// Stop all active workers
-	for _, cancelFunc := range as.activeWorkers {
-		cancelFunc()
+	if !as.running {
+		return
 	}
-	as.activeWorkers = nil
-	as.currentWorkers = 0
 
-	log.Println("✅ Auto-scaler parado com sucesso")
+	as.running = false
+	as.cancel()
+
+	// Wait for goroutine to finish with timeout
+	done := make(chan struct{})
+	go func() {
+		as.wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		logger.Info("✅ Auto-scaler parado com sucesso")
+	case <-time.After(5 * time.Second):
+		logger.Warn("⚠️ Timeout ao parar auto-scaler")
+	}
 }
 
 // monitorAndScale continuously monitors queue metrics and adjusts workers
@@ -140,8 +153,7 @@ func (as *AutoScaler) evaluateAndScale() {
 	targetWorkers := as.calculateTargetWorkers(utilization, totalQueueSize)
 
 	if targetWorkers != as.currentWorkers {
-		log.Printf("📊 Queue utilization: %.2f%%, Queue size: %d, Current workers: %d → Target: %d",
-			utilization*100, totalQueueSize, as.currentWorkers, targetWorkers)
+		logger.Info("📊 Queue utilization", "utilization", utilization*100, "totalQueueSize", totalQueueSize, "currentWorkers", as.currentWorkers, "targetWorkers", targetWorkers)
 
 		as.scaleToWorkers(targetWorkers)
 	}
@@ -196,7 +208,7 @@ func (as *AutoScaler) scaleToWorkers(targetWorkers int) {
 		as.metrics.LastScalingDecision = time.Now()
 		as.metrics.mutex.Unlock()
 
-		log.Printf("⬆️ Scaled UP: %d → %d workers (+%d)", currentWorkers, targetWorkers, workersToAdd)
+		logger.Info("⬆️ Scaled UP", "from", currentWorkers, "to", targetWorkers, "workersAdded", workersToAdd)
 
 	} else if targetWorkers < currentWorkers {
 		// Scale down - remove workers
@@ -213,7 +225,7 @@ func (as *AutoScaler) scaleToWorkers(targetWorkers int) {
 		as.metrics.LastScalingDecision = time.Now()
 		as.metrics.mutex.Unlock()
 
-		log.Printf("⬇️ Scaled DOWN: %d → %d workers (-%d)", currentWorkers, targetWorkers, workersToRemove)
+		logger.Info("⬇️ Scaled DOWN", "from", currentWorkers, "to", targetWorkers, "workersRemoved", workersToRemove)
 	}
 
 	as.currentWorkers = targetWorkers
@@ -221,8 +233,8 @@ func (as *AutoScaler) scaleToWorkers(targetWorkers int) {
 
 // dynamicWorker is a worker that can process any type of payment queue
 func (as *AutoScaler) dynamicWorker(ctx context.Context, workerID int) {
-	log.Printf("🔧 Dynamic Worker %d iniciado", workerID)
-	defer log.Printf("🔧 Dynamic Worker %d parado", workerID)
+	logger.Info("🔧 Dynamic Worker iniciado", "workerID", workerID)
+	defer logger.Info("🔧 Dynamic Worker parado", "workerID", workerID)
 
 	ticker := time.NewTicker(100 * time.Millisecond) // Check queues every 100ms
 	defer ticker.Stop()

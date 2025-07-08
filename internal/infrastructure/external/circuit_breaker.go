@@ -2,7 +2,7 @@ package external
 
 import (
 	"fmt"
-	"log"
+	"rinha-backend-clean/internal/infrastructure/logger"
 	"sync"
 	"time"
 )
@@ -46,7 +46,7 @@ func (cb *CircuitBreaker) Execute(f func() error) error {
 			// Time to try again, move to Half-Open
 			cb.state = CircuitHalfOpen
 			cb.failureCount = 0
-			log.Printf("Circuit Breaker '%s' mudou para HALF-OPEN", cb.name)
+			logger.Infof("Circuit Breaker '%s' mudou para HALF-OPEN", cb.name)
 		} else {
 			return fmt.Errorf("circuit breaker '%s' está OPEN. Não executando a função", cb.name)
 		}
@@ -60,11 +60,11 @@ func (cb *CircuitBreaker) Execute(f func() error) error {
 	if err != nil {
 		cb.failureCount++
 		cb.lastFailureTime = time.Now()
-		log.Printf("Circuit Breaker '%s' falhou. Contagem de falhas: %d", cb.name, cb.failureCount)
+		logger.Infof("Circuit Breaker '%s' falhou. Contagem de falhas: %d", cb.name, cb.failureCount)
 
 		if cb.state == CircuitHalfOpen || cb.failureCount >= cb.maxFailures {
 			cb.state = CircuitOpen
-			log.Printf("Circuit Breaker '%s' mudou para OPEN", cb.name)
+			logger.Infof("Circuit Breaker '%s' mudou para OPEN", cb.name)
 		}
 		return err
 	}
@@ -73,7 +73,7 @@ func (cb *CircuitBreaker) Execute(f func() error) error {
 	cb.failureCount = 0
 	if cb.state == CircuitHalfOpen {
 		cb.state = CircuitClosed
-		log.Printf("Circuit Breaker '%s' mudou para CLOSED", cb.name)
+		logger.Infof("Circuit Breaker '%s' mudou para CLOSED", cb.name)
 	}
 
 	return nil

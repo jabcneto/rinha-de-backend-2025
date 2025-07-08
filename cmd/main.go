@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -13,13 +12,14 @@ import (
 	"rinha-backend-clean/internal/application/usecases"
 	"rinha-backend-clean/internal/infrastructure/database"
 	"rinha-backend-clean/internal/infrastructure/external"
+	"rinha-backend-clean/internal/infrastructure/logger"
 	"rinha-backend-clean/internal/infrastructure/queue"
 	httpInterface "rinha-backend-clean/internal/interfaces/http"
 	"rinha-backend-clean/internal/interfaces/http/handlers"
 )
 
 func main() {
-	log.Println("Iniciando Rinha Backend 2025 - Clean Architecture")
+	logger.Info("Iniciando Rinha Backend 2025 - Clean Architecture")
 
 	// Load configuration from environment
 	config := loadConfig()
@@ -27,7 +27,7 @@ func main() {
 	// Initialize database connection
 	db, err := database.NewConnection(config.Database)
 	if err != nil {
-		log.Fatalf("Erro ao conectar ao banco de dados: %v", err)
+		logger.Fatalf("Erro ao conectar ao banco de dados: %v", err)
 	}
 	defer db.Close()
 
@@ -67,12 +67,12 @@ func main() {
 
 	// Start queue processing
 	if err := queueService.StartProcessing(ctx, paymentProcessor, paymentRepo); err != nil {
-		log.Fatalf("Erro ao iniciar processamento da fila: %v", err)
+		logger.Fatalf("Erro ao iniciar processamento da fila: %v", err)
 	}
 
 	// Start retry queue processing
 	if err := retryQueueService.StartRetryProcessing(paymentProcessor, paymentRepo); err != nil {
-		log.Fatalf("Erro ao iniciar processamento da fila de retry: %v", err)
+		logger.Fatalf("Erro ao iniciar processamento da fila de retry: %v", err)
 	}
 
 	// Start auto-scaler
@@ -89,9 +89,9 @@ func main() {
 
 	// Start server in a goroutine
 	go func() {
-		log.Printf("Servidor iniciado na porta %d", config.Server.Port)
+		logger.Infof("Servidor iniciado na porta %d", config.Server.Port)
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("Erro ao iniciar servidor: %v", err)
+			logger.Fatalf("Erro ao iniciar servidor: %v", err)
 		}
 	}()
 
@@ -100,7 +100,7 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
-	log.Println("Iniciando shutdown graceful...")
+	logger.Info("Iniciando shutdown graceful...")
 
 	// Create a deadline for shutdown
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -108,23 +108,23 @@ func main() {
 
 	// Shutdown HTTP server
 	if err := server.Shutdown(shutdownCtx); err != nil {
-		log.Printf("Erro durante shutdown do servidor: %v", err)
+		logger.Warnf("Erro durante shutdown do servidor: %v", err)
 	}
 
 	// Stop queue processing
 	if err := queueService.Stop(shutdownCtx); err != nil {
-		log.Printf("Erro ao parar processamento da fila: %v", err)
+		logger.Warnf("Erro ao parar processamento da fila: %v", err)
 	}
 
 	// Stop retry queue processing
 	if err := retryQueueService.Stop(); err != nil {
-		log.Printf("Erro ao parar processamento da fila de retry: %v", err)
+		logger.Warnf("Erro ao parar processamento da fila de retry: %v", err)
 	}
 
 	// Cancel background services
 	cancel()
 
-	log.Println("Servidor encerrado com sucesso")
+	logger.Info("Servidor encerrado com sucesso")
 }
 
 // Config holds application configuration

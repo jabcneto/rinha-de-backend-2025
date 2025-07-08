@@ -5,8 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
-	"log"
+	"io"
 	"net/http"
 	"os"
 	"sync"
@@ -14,6 +13,7 @@ import (
 
 	"rinha-backend-clean/internal/domain/entities"
 	"rinha-backend-clean/internal/domain/services"
+	"rinha-backend-clean/internal/infrastructure/logger"
 )
 
 // PaymentProcessorClient implements the PaymentProcessorService interface
@@ -59,8 +59,8 @@ const (
 	HealthCheckPath            = "/payments/service-health"
 	PaymentsPath               = "/payments"
 	HealthCheckInterval        = 15 * time.Second
-	CircuitBreakerMaxFailures  = 5
-	CircuitBreakerResetTimeout = 5 * time.Second
+	CircuitBreakerMaxFailures  = 10
+	CircuitBreakerResetTimeout = 2 * time.Second
 )
 
 // NewPaymentProcessorClient creates a new payment processor client
@@ -136,7 +136,7 @@ func (c *PaymentProcessorClient) ProcessPayment(ctx context.Context, payment *en
 		return entities.ProcessorTypeDefault, nil
 	}
 
-	log.Printf("Falha ao enviar para o processador default: %v. Tentando fallback...", err)
+	logger.Infof("Falha ao enviar para o processador default: %v. Tentando fallback...", err)
 
 	// Try fallback processor
 	err = c.fallbackProcessor.circuitBreaker.Execute(func() error {
@@ -194,14 +194,18 @@ func (c *PaymentProcessorClient) sendPaymentToURL(ctx context.Context, targetURL
 	if err != nil {
 		return fmt.Errorf("erro ao enviar pagamento para %s: %w", targetURL, err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if cerr := resp.Body.Close(); cerr != nil {
+			logger.Warnf("Erro ao fechar o corpo da resposta: %v", cerr)
+		}
+	}()
 
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		log.Printf("Pagamento %s processado com sucesso por %s", request.CorrelationID, targetURL)
+		logger.Infof("Pagamento %s processado com sucesso por %s", request.CorrelationID, targetURL)
 		return nil
 	}
 
-	bodyBytes, _ := ioutil.ReadAll(resp.Body)
+	bodyBytes, _ := io.ReadAll(resp.Body)
 	return fmt.Errorf("processador de pagamento %s retornou status %d: %s", targetURL, resp.StatusCode, string(bodyBytes))
 }
 
@@ -251,20 +255,20 @@ func (c *PaymentProcessorClient) runHealthCheck(ctx context.Context, isDefault b
 			processor.lastCheck = time.Now()
 			if err != nil {
 				processor.isFailing = true
-				log.Printf("Health check para %s falhou: %v", processorName, err)
+				logger.Errorf("Health check para %s falhou: %v", processorName, err)
 			} else {
 				wasFailingBefore := processor.isFailing
 				processor.isFailing = health.Failing
 				processor.minResponseTime = health.MinResponseTime
 
 				if wasFailingBefore != health.Failing || health.Failing {
-					log.Printf("Health check para %s: Failing=%t, MinResponseTime=%d", processorName, health.Failing, health.MinResponseTime)
+					logger.Infof("Health check para %s: Failing=%t, MinResponseTime=%d", processorName, health.Failing, health.MinResponseTime)
 				}
 			}
 			c.mutex.Unlock()
 
 		case <-ctx.Done():
-			log.Printf("Health check para %s parado", map[bool]string{true: "default", false: "fallback"}[isDefault])
+			logger.Infof("Health check para %s parado", map[bool]string{true: "default", false: "fallback"}[isDefault])
 			return
 		}
 	}
@@ -287,7 +291,7 @@ func (c *PaymentProcessorClient) getHealthCheck(ctx context.Context, processorUR
 		return nil, fmt.Errorf("health check retornou status inesperado: %d", resp.StatusCode)
 	}
 
-	body, err := ioutil.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("erro ao ler resposta do health check: %w", err)
 	}

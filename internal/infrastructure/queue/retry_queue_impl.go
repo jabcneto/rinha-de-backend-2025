@@ -3,12 +3,11 @@ package queue
 import (
 	"context"
 	"fmt"
-	"log"
-	"sync"
-	"time"
-
 	"rinha-backend-clean/internal/domain/entities"
 	"rinha-backend-clean/internal/domain/services"
+	"rinha-backend-clean/internal/infrastructure/logger"
+	"sync"
+	"time"
 )
 
 // RetryQueueImpl implements the RetryQueueService interface
@@ -63,14 +62,14 @@ func NewRetryQueue(bufferSize, workerCount int) services.RetryQueueService {
 func (rq *RetryQueueImpl) EnqueueForDefaultRetry(ctx context.Context, payment *entities.Payment) error {
 	select {
 	case rq.defaultRetryQueue <- payment:
-		log.Printf("Pagamento %s enfileirado para retry no processador default (tentativa %d)",
+		logger.Infof("Pagamento %s enfileirado para retry no processador default (tentativa %d)",
 			payment.CorrelationID, payment.RetryCount)
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
 	default:
-		log.Printf("AVISO: Fila de retry default cheia! Pagamento %s descartado", payment.CorrelationID)
-		return fmt.Errorf("fila de retry default cheia")
+		logger.Warnf("AVISO: Fila de retry default cheia! Pagamento %s descartado", payment.CorrelationID)
+		return nil
 	}
 }
 
@@ -78,35 +77,35 @@ func (rq *RetryQueueImpl) EnqueueForDefaultRetry(ctx context.Context, payment *e
 func (rq *RetryQueueImpl) EnqueueForFallbackRetry(ctx context.Context, payment *entities.Payment) error {
 	select {
 	case rq.fallbackRetryQueue <- payment:
-		log.Printf("Pagamento %s enfileirado para retry no processador fallback (tentativa %d)",
+		logger.Infof("Pagamento %s enfileirado para retry no processador fallback (tentativa %d)",
 			payment.CorrelationID, payment.RetryCount)
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
 	default:
-		log.Printf("AVISO: Fila de retry fallback cheia! Pagamento %s descartado", payment.CorrelationID)
-		return fmt.Errorf("fila de retry fallback cheia")
+		logger.Warnf("AVISO: Fila de retry fallback cheia! Pagamento %s descartado", payment.CorrelationID)
+		return nil
 	}
 }
 
-// EnqueueForPermanentRetry enqueues a payment for permanent retry processing
+// EnqueueForPermanentRetry enqueues a payment for permanent retry
 func (rq *RetryQueueImpl) EnqueueForPermanentRetry(ctx context.Context, payment *entities.Payment) error {
 	select {
 	case rq.permanentRetryQueue <- payment:
-		log.Printf("Pagamento %s enfileirado para retry permanente (tentativa %d)",
+		logger.Infof("Pagamento %s enfileirado para retry permanente (tentativa %d)",
 			payment.CorrelationID, payment.RetryCount)
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
 	default:
-		log.Printf("AVISO: Fila de retry permanente cheia! Pagamento %s descartado", payment.CorrelationID)
-		return fmt.Errorf("fila de retry permanente cheia")
+		logger.Warnf("AVISO: Fila de retry permanente cheia! Pagamento %s descartado", payment.CorrelationID)
+		return nil
 	}
 }
 
 // StartRetryProcessing starts the retry processing workers
 func (rq *RetryQueueImpl) StartRetryProcessing(processor services.PaymentProcessorService, repository services.PaymentRepository) error {
-	log.Printf("Iniciando %d workers para retry de pagamentos...", rq.workerCount*3)
+	logger.WithField("workers", rq.workerCount*3).Info("Iniciando workers para retry de pagamentos")
 
 	// Start workers for default retry queue
 	for i := 0; i < rq.workerCount; i++ {
@@ -144,22 +143,17 @@ func (rq *RetryQueueImpl) StartRetryProcessing(processor services.PaymentProcess
 func (rq *RetryQueueImpl) defaultRetryWorker(id int, processor services.PaymentProcessorService, repository services.PaymentRepository, stop chan struct{}) {
 	defer rq.wg.Done()
 
-	log.Printf("Default Retry Worker %d iniciado", id)
-	ticker := time.NewTicker(rq.tickerInterval)
-	defer ticker.Stop()
+	logger.Infof("Default Retry Worker %d iniciado", id)
 
 	for {
 		select {
 		case payment := <-rq.defaultRetryQueue:
 			rq.processDefaultRetry(payment, processor, repository)
-		case <-ticker.C:
-			// Periodically check for payments ready for retry
-			continue
 		case <-stop:
-			log.Printf("Default Retry Worker %d parado", id)
+			logger.Infof("Default Retry Worker %d parado", id)
 			return
 		case <-rq.ctx.Done():
-			log.Printf("Default Retry Worker %d parado por contexto", id)
+			logger.Infof("Default Retry Worker %d parado por contexto", id)
 			return
 		}
 	}
@@ -169,22 +163,17 @@ func (rq *RetryQueueImpl) defaultRetryWorker(id int, processor services.PaymentP
 func (rq *RetryQueueImpl) fallbackRetryWorker(id int, processor services.PaymentProcessorService, repository services.PaymentRepository, stop chan struct{}) {
 	defer rq.wg.Done()
 
-	log.Printf("Fallback Retry Worker %d iniciado", id)
-	ticker := time.NewTicker(rq.tickerInterval)
-	defer ticker.Stop()
+	logger.Infof("Fallback Retry Worker %d iniciado", id)
 
 	for {
 		select {
 		case payment := <-rq.fallbackRetryQueue:
 			rq.processFallbackRetry(payment, processor, repository)
-		case <-ticker.C:
-			// Periodically check for payments ready for retry
-			continue
 		case <-stop:
-			log.Printf("Fallback Retry Worker %d parado", id)
+			logger.Infof("Fallback Retry Worker %d parado", id)
 			return
 		case <-rq.ctx.Done():
-			log.Printf("Fallback Retry Worker %d parado por contexto", id)
+			logger.Infof("Fallback Retry Worker %d parado por contexto", id)
 			return
 		}
 	}
@@ -194,76 +183,90 @@ func (rq *RetryQueueImpl) fallbackRetryWorker(id int, processor services.Payment
 func (rq *RetryQueueImpl) permanentRetryWorker(id int, processor services.PaymentProcessorService, repository services.PaymentRepository, stop chan struct{}) {
 	defer rq.wg.Done()
 
-	log.Printf("Permanent Retry Worker %d iniciado", id)
-	ticker := time.NewTicker(rq.permanentTickerInterval)
-	defer ticker.Stop()
+	logger.Infof("Permanent Retry Worker %d iniciado", id)
 
 	for {
 		select {
 		case payment := <-rq.permanentRetryQueue:
 			rq.processPermanentRetry(payment, processor, repository)
-		case <-ticker.C:
-			// Periodically check for payments ready for retry
-			continue
 		case <-stop:
-			log.Printf("Permanent Retry Worker %d parado", id)
+			logger.Infof("Permanent Retry Worker %d parado", id)
 			return
 		case <-rq.ctx.Done():
-			log.Printf("Permanent Retry Worker %d parado por contexto", id)
+			logger.Infof("Permanent Retry Worker %d parado por contexto", id)
 			return
 		}
 	}
 }
 
-// processDefaultRetry processes a single payment retry with default processor
+// processDefaultRetry processes a payment retry with default processor
 func (rq *RetryQueueImpl) processDefaultRetry(payment *entities.Payment, processor services.PaymentProcessorService, repository services.PaymentRepository) {
-	// Check if payment is ready for retry (respecting backoff)
-	if !payment.IsReadyForRetry() {
-		// Re-enqueue for later processing
-		go func() {
-			time.Sleep(time.Until(*payment.NextRetryAt))
-			if err := rq.EnqueueForDefaultRetry(context.Background(), payment); err != nil {
-				log.Printf("Erro ao reenfileirar pagamento %s para retry default: %v", payment.CorrelationID, err)
-			}
-		}()
-		return
-	}
-
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	log.Printf("Tentando reprocessar pagamento %s no processador default (tentativa %d)",
-		payment.CorrelationID, payment.RetryCount)
+	// Check if payment can still be retried
+	if payment.RetryCount >= rq.maxDefaultRetries {
+		// Re-enqueue for fallback retry
+		if err := rq.EnqueueForFallbackRetry(ctx, payment); err != nil {
+			logger.WithField("correlation_id", payment.CorrelationID).
+				WithError(err).
+				Error("Erro ao reenfileirar pagamento para retry fallback")
+		}
+		return
+	}
+
+	// Wait for retry interval if needed
+	if payment.NextRetryAt != nil && payment.NextRetryAt.After(time.Now()) {
+		time.Sleep(payment.NextRetryAt.Sub(time.Now()))
+	}
+
+	logger.WithField("correlation_id", payment.CorrelationID).
+		WithField("retry_count", payment.RetryCount).
+		Info("Tentando reprocessar pagamento no processador default")
 
 	// Try to process with default processor only
 	processorType, err := rq.processWithSpecificProcessor(ctx, processor, payment, entities.ProcessorTypeDefault)
 	if err != nil {
-		log.Printf("Erro ao reprocessar pagamento %s no default: %v", payment.CorrelationID, err)
+		logger.WithField("correlation_id", payment.CorrelationID).
+			WithError(err).
+			Error("Erro ao reprocessar pagamento no default")
 
 		// Mark for retry with exponential backoff
-		if payment.MarkForRetry(err, rq.maxDefaultRetries) {
+		if payment.RetryCount < rq.maxDefaultRetries {
+			payment.RetryCount++
+			nextRetry := time.Now().Add(time.Duration(payment.RetryCount) * rq.tickerInterval)
+			payment.NextRetryAt = &nextRetry
 			// Still has retries left, re-enqueue
 			if enqErr := rq.EnqueueForDefaultRetry(ctx, payment); enqErr != nil {
-				log.Printf("Erro ao reenfileirar pagamento %s para retry default: %v", payment.CorrelationID, enqErr)
+				logger.WithField("correlation_id", payment.CorrelationID).
+					WithError(enqErr).
+					Error("Erro ao reenfileirar pagamento para retry default")
 			}
 		} else {
 			// Exceeded max retries for default, try fallback
-			log.Printf("Máximo de tentativas no default excedido para %s, movendo para fallback", payment.CorrelationID)
+			logger.WithField("correlation_id", payment.CorrelationID).
+				Info("Máximo de tentativas no default excedido, movendo para fallback")
 			payment.RetryCount = 0 // Reset retry count for fallback
 			if enqErr := rq.EnqueueForFallbackRetry(ctx, payment); enqErr != nil {
-				log.Printf("Erro ao reenfileirar pagamento %s para retry fallback: %v", payment.CorrelationID, enqErr)
+				logger.WithField("correlation_id", payment.CorrelationID).
+					WithError(enqErr).
+					Error("Erro ao reenfileirar pagamento para retry fallback")
 			}
 		}
 
 		// Update payment in database
 		if updateErr := repository.Update(ctx, payment); updateErr != nil {
-			log.Printf("Erro ao atualizar pagamento %s: %v", payment.CorrelationID, updateErr)
+			logger.WithField("correlation_id", payment.CorrelationID).
+				WithError(updateErr).
+				Error("Erro ao atualizar pagamento")
 		}
 		return
 	}
 
 	// Payment processed successfully
-	log.Printf("Pagamento %s reprocessado com sucesso no processador %s", payment.CorrelationID, processorType)
+	logger.WithField("correlation_id", payment.CorrelationID).
+		WithField("processor_type", processorType).
+		Info("Pagamento reprocessado com sucesso no processador default")
 	payment.Status = entities.PaymentStatusProcessed
 	payment.ProcessorType = processorType
 	now := time.Now()
@@ -272,64 +275,98 @@ func (rq *RetryQueueImpl) processDefaultRetry(payment *entities.Payment, process
 
 	// Update payment in database
 	if err := repository.Update(ctx, payment); err != nil {
-		log.Printf("Erro ao atualizar pagamento processado %s: %v", payment.CorrelationID, err)
+		logger.WithField("correlation_id", payment.CorrelationID).
+			WithError(err).
+			Error("Erro ao atualizar pagamento processado")
 	}
 
 	// Update summary
 	if err := repository.UpdateSummary(ctx, processorType, payment.Amount); err != nil {
-		log.Printf("Erro ao atualizar resumo para %s: %v", processorType, err)
+		logger.WithField("processor_type", processorType).
+			WithError(err).
+			Error("Erro ao atualizar resumo")
 	}
 }
 
 // processFallbackRetry processes a single payment retry with fallback processor
 func (rq *RetryQueueImpl) processFallbackRetry(payment *entities.Payment, processor services.PaymentProcessorService, repository services.PaymentRepository) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
 	// Check if payment is ready for retry (respecting backoff)
-	if !payment.IsReadyForRetry() {
-		// Re-enqueue for later processing
+	if payment.NextRetryAt != nil && payment.NextRetryAt.After(time.Now()) {
+		// Schedule for later processing using a timer instead of blocking sleep
+		delay := time.Until(*payment.NextRetryAt)
+
+		// Use a timer that can be cancelled and doesn't block the worker
+		timer := time.NewTimer(delay)
 		go func() {
-			time.Sleep(time.Until(*payment.NextRetryAt))
-			if err := rq.EnqueueForFallbackRetry(context.Background(), payment); err != nil {
-				log.Printf("Erro ao reenfileirar pagamento %s para retry fallback: %v", payment.CorrelationID, err)
+			defer timer.Stop()
+			select {
+			case <-timer.C:
+				// Time has elapsed, re-enqueue for processing
+				if err := rq.EnqueueForFallbackRetry(context.Background(), payment); err != nil {
+					logger.WithField("correlation_id", payment.CorrelationID).
+						WithError(err).
+						Error("Erro ao reenfileirar pagamento para retry fallback após delay")
+				}
+			case <-rq.ctx.Done():
+				// Service is shutting down, don't re-enqueue
+				logger.WithField("correlation_id", payment.CorrelationID).
+					Debug("Retry cancelado devido ao shutdown do serviço")
+				return
 			}
 		}()
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	log.Printf("Tentando reprocessar pagamento %s no processador fallback (tentativa %d)",
-		payment.CorrelationID, payment.RetryCount)
+	logger.WithField("correlation_id", payment.CorrelationID).
+		WithField("retry_count", payment.RetryCount).
+		Info("Tentando reprocessar pagamento no processador fallback")
 
 	// Try to process with fallback processor only
 	processorType, err := rq.processWithSpecificProcessor(ctx, processor, payment, entities.ProcessorTypeFallback)
 	if err != nil {
-		log.Printf("Erro ao reprocessar pagamento %s no fallback: %v", payment.CorrelationID, err)
+		logger.WithField("correlation_id", payment.CorrelationID).
+			WithError(err).
+			Error("Erro ao reprocessar pagamento no fallback")
 
 		// Mark for retry with exponential backoff
-		if payment.MarkForRetry(err, rq.maxFallbackRetries) {
+		if payment.RetryCount < rq.maxFallbackRetries {
+			payment.RetryCount++
+			nextRetry := time.Now().Add(time.Duration(payment.RetryCount) * rq.tickerInterval)
+			payment.NextRetryAt = &nextRetry
 			// Still has retries left, re-enqueue
 			if enqErr := rq.EnqueueForFallbackRetry(ctx, payment); enqErr != nil {
-				log.Printf("Erro ao reenfileirar pagamento %s para retry fallback: %v", payment.CorrelationID, enqErr)
+				logger.WithField("correlation_id", payment.CorrelationID).
+					WithError(enqErr).
+					Error("Erro ao reenfileirar pagamento para retry fallback")
 			}
 		} else {
 			// Exceeded max retries for fallback, move to permanent retry
-			log.Printf("Máximo de tentativas no fallback excedido para %s, movendo para retry permanente", payment.CorrelationID)
+			logger.WithField("correlation_id", payment.CorrelationID).
+				Info("Máximo de tentativas no fallback excedido, movendo para retry permanente")
 			payment.RetryCount = 0 // Reset retry count for permanent retry
 			if enqErr := rq.EnqueueForPermanentRetry(ctx, payment); enqErr != nil {
-				log.Printf("Erro ao reenfileirar pagamento %s para retry permanente: %v", payment.CorrelationID, enqErr)
+				logger.WithField("correlation_id", payment.CorrelationID).
+					WithError(enqErr).
+					Error("Erro ao reenfileirar pagamento para retry permanente")
 			}
 		}
 
 		// Update payment in database
 		if updateErr := repository.Update(ctx, payment); updateErr != nil {
-			log.Printf("Erro ao atualizar pagamento %s: %v", payment.CorrelationID, updateErr)
+			logger.WithField("correlation_id", payment.CorrelationID).
+				WithError(updateErr).
+				Error("Erro ao atualizar pagamento")
 		}
 		return
 	}
 
 	// Payment processed successfully
-	log.Printf("Pagamento %s reprocessado com sucesso no processador %s", payment.CorrelationID, processorType)
+	logger.WithField("correlation_id", payment.CorrelationID).
+		WithField("processor_type", processorType).
+		Info("Pagamento reprocessado com sucesso no processador fallback")
 	payment.Status = entities.PaymentStatusProcessed
 	payment.ProcessorType = processorType
 	now := time.Now()
@@ -338,34 +375,54 @@ func (rq *RetryQueueImpl) processFallbackRetry(payment *entities.Payment, proces
 
 	// Update payment in database
 	if err := repository.Update(ctx, payment); err != nil {
-		log.Printf("Erro ao atualizar pagamento processado %s: %v", payment.CorrelationID, err)
+		logger.WithField("correlation_id", payment.CorrelationID).
+			WithError(err).
+			Error("Erro ao atualizar pagamento processado")
 	}
 
 	// Update summary
 	if err := repository.UpdateSummary(ctx, processorType, payment.Amount); err != nil {
-		log.Printf("Erro ao atualizar resumo para %s: %v", processorType, err)
+		logger.WithField("processor_type", processorType).
+			WithError(err).
+			Error("Erro ao atualizar resumo")
 	}
 }
 
 // processPermanentRetry processes a single payment retry with permanent processor
 func (rq *RetryQueueImpl) processPermanentRetry(payment *entities.Payment, processor services.PaymentProcessorService, repository services.PaymentRepository) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
 	// Check if payment is ready for retry (respecting backoff)
-	if !payment.IsReadyForRetry() {
-		// Re-enqueue for later processing
+	if payment.NextRetryAt != nil && payment.NextRetryAt.After(time.Now()) {
+		// Schedule for later processing using a timer instead of blocking sleep
+		delay := time.Until(*payment.NextRetryAt)
+
+		// Use a timer that can be cancelled and doesn't block the worker
+		timer := time.NewTimer(delay)
 		go func() {
-			time.Sleep(time.Until(*payment.NextRetryAt))
-			if err := rq.EnqueueForPermanentRetry(context.Background(), payment); err != nil {
-				log.Printf("Erro ao reenfileirar pagamento %s para retry permanente: %v", payment.CorrelationID, err)
+			defer timer.Stop()
+			select {
+			case <-timer.C:
+				// Time has elapsed, re-enqueue for processing
+				if err := rq.EnqueueForPermanentRetry(context.Background(), payment); err != nil {
+					logger.WithField("correlation_id", payment.CorrelationID).
+						WithError(err).
+						Error("Erro ao reenfileirar pagamento para retry permanente após delay")
+				}
+			case <-rq.ctx.Done():
+				// Service is shutting down, don't re-enqueue
+				logger.WithField("correlation_id", payment.CorrelationID).
+					Debug("Retry cancelado devido ao shutdown do serviço")
+				return
 			}
 		}()
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	log.Printf("Tentando reprocessar pagamento %s na fila permanente (tentativa %d)",
-		payment.CorrelationID, payment.RetryCount)
+	logger.WithField("correlation_id", payment.CorrelationID).
+		WithField("retry_count", payment.RetryCount).
+		Info("Tentando reprocessar pagamento na fila permanente")
 
 	// Try to process with both processors (using ProcessWithPermanent logic)
 	var processorType entities.ProcessorType
@@ -375,30 +432,44 @@ func (rq *RetryQueueImpl) processPermanentRetry(payment *entities.Payment, proce
 	err = processor.ProcessWithDefault(ctx, payment)
 	if err == nil {
 		processorType = entities.ProcessorTypeDefault
-		log.Printf("Pagamento %s processado com sucesso no processador default (fila permanente)", payment.CorrelationID)
+		logger.WithField("correlation_id", payment.CorrelationID).
+			WithField("processor_type", processorType).
+			Info("Pagamento processado com sucesso no processador default (fila permanente)")
 	} else {
-		log.Printf("Falha no default para pagamento %s (fila permanente): %v. Tentando fallback...", payment.CorrelationID, err)
+		logger.WithField("correlation_id", payment.CorrelationID).
+			WithError(err).
+			Info("Falha no default para pagamento (fila permanente), tentando fallback")
 
 		// If default fails, try fallback processor
 		err = processor.ProcessWithFallback(ctx, payment)
 		if err == nil {
 			processorType = entities.ProcessorTypeFallback
-			log.Printf("Pagamento %s processado com sucesso no processador fallback (fila permanente)", payment.CorrelationID)
+			logger.WithField("correlation_id", payment.CorrelationID).
+				WithField("processor_type", processorType).
+				Info("Pagamento processado com sucesso no processador fallback (fila permanente)")
 		}
 	}
 
 	if err != nil {
-		log.Printf("Erro ao reprocessar pagamento %s na fila permanente: %v", payment.CorrelationID, err)
+		logger.WithField("correlation_id", payment.CorrelationID).
+			WithError(err).
+			Error("Erro ao reprocessar pagamento na fila permanente")
 
 		// Mark for retry with exponential backoff
-		if payment.MarkForRetry(err, rq.maxPermanentRetries) {
+		if payment.RetryCount < rq.maxPermanentRetries {
+			payment.RetryCount++
+			nextRetry := time.Now().Add(time.Duration(payment.RetryCount) * rq.permanentTickerInterval)
+			payment.NextRetryAt = &nextRetry
 			// Still has retries left, re-enqueue
 			if enqErr := rq.EnqueueForPermanentRetry(ctx, payment); enqErr != nil {
-				log.Printf("Erro ao reenfileirar pagamento %s para retry permanente: %v", payment.CorrelationID, enqErr)
+				logger.WithField("correlation_id", payment.CorrelationID).
+					WithError(enqErr).
+					Error("Erro ao reenfileirar pagamento para retry permanente")
 			}
 		} else {
 			// Exceeded max retries, mark as permanently failed
-			log.Printf("Máximo de tentativas excedido para %s, marcando como falhou permanentemente", payment.CorrelationID)
+			logger.WithField("correlation_id", payment.CorrelationID).
+				Info("Máximo de tentativas excedido, marcando como falhou permanentemente")
 			payment.Status = entities.PaymentStatusFailed
 			now := time.Now()
 			payment.UpdatedAt = now
@@ -406,13 +477,17 @@ func (rq *RetryQueueImpl) processPermanentRetry(payment *entities.Payment, proce
 
 		// Update payment in database
 		if updateErr := repository.Update(ctx, payment); updateErr != nil {
-			log.Printf("Erro ao atualizar pagamento %s: %v", payment.CorrelationID, updateErr)
+			logger.WithField("correlation_id", payment.CorrelationID).
+				WithError(updateErr).
+				Error("Erro ao atualizar pagamento")
 		}
 		return
 	}
 
 	// Payment processed successfully
-	log.Printf("Pagamento %s reprocessado com sucesso no processador %s", payment.CorrelationID, processorType)
+	logger.WithField("correlation_id", payment.CorrelationID).
+		WithField("processor_type", processorType).
+		Info("Pagamento reprocessado com sucesso no processador")
 	payment.Status = entities.PaymentStatusProcessed
 	payment.ProcessorType = processorType
 	now := time.Now()
@@ -420,16 +495,21 @@ func (rq *RetryQueueImpl) processPermanentRetry(payment *entities.Payment, proce
 	payment.UpdatedAt = now
 
 	// Reset retry information since payment was successful
-	payment.ResetRetryInfo()
+	payment.RetryCount = 0
+	payment.NextRetryAt = nil
 
 	// Update payment in database
 	if err := repository.Update(ctx, payment); err != nil {
-		log.Printf("Erro ao atualizar pagamento processado %s: %v", payment.CorrelationID, err)
+		logger.WithField("correlation_id", payment.CorrelationID).
+			WithError(err).
+			Error("Erro ao atualizar pagamento processado")
 	}
 
 	// Update summary
 	if err := repository.UpdateSummary(ctx, processorType, payment.Amount); err != nil {
-		log.Printf("Erro ao atualizar resumo para %s: %v", processorType, err)
+		logger.WithField("processor_type", processorType).
+			WithError(err).
+			Error("Erro ao atualizar resumo")
 	}
 }
 
@@ -457,7 +537,7 @@ func (rq *RetryQueueImpl) processWithSpecificProcessor(ctx context.Context, proc
 
 // Stop stops all retry workers
 func (rq *RetryQueueImpl) Stop() error {
-	log.Println("Parando serviço de retry...")
+	logger.Info("Parando serviço de retry...")
 
 	rq.mutex.Lock()
 	defer rq.mutex.Unlock()
@@ -482,15 +562,15 @@ func (rq *RetryQueueImpl) Stop() error {
 	// Wait with timeout
 	select {
 	case <-done:
-		log.Println("Todos os workers de retry pararam com sucesso")
+		logger.Info("Todos os workers de retry pararam com sucesso")
 	case <-time.After(10 * time.Second):
-		log.Println("AVISO: Timeout ao parar workers de retry")
+		logger.Warn("AVISO: Timeout ao parar workers de retry")
 	}
 
 	// Close channels
 	close(rq.defaultRetryQueue)
 	close(rq.fallbackRetryQueue)
-	close(rq.permanentRetryQueue) // Fecha a nova fila
+	close(rq.permanentRetryQueue)
 
 	return nil
 }
