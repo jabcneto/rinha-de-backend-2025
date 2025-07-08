@@ -218,3 +218,4 @@ security-report.*
 # Application specific
 payments.db
 rinha-data/
+/vendor/
