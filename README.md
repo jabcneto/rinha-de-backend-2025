@@ -88,7 +88,7 @@ internal/              # Código interno da aplicação
 
 ```bash
 # Clone o repositório
-git clone <repository-url>
+git clone https://github.com/jabcneto/rinha-de-backend-2025
 cd rinha-backend
 
 # Inicie todos os serviços
@@ -168,11 +168,6 @@ GET /payments-summary
 }
 ```
 
-### Limpar Pagamentos (Desenvolvimento)
-```http
-DELETE /payments
-```
-
 ## ⚡ Performance
 
 ### Otimizações Implementadas
@@ -200,37 +195,6 @@ DELETE /payments
 - **Latência**: P95 < 100ms para operações de escrita
 - **Disponibilidade**: 99.9%+ com circuit breakers
 - **Recovery Time**: < 5s após falhas temporárias
-
-## 📊 Monitoramento
-
-### Scripts Inclusos
-
-```bash
-# Monitoramento de scaling automático
-./monitor_scaling.sh
-
-# Teste de performance
-./test_performance.sh
-
-# Gestão da aplicação
-./manage.sh [start|stop|restart|status]
-```
-
-### Logs Estruturados
-
-A aplicação produz logs estruturados em JSON para facilitar observabilidade:
-
-```json
-{
-  "level": "info",
-  "timestamp": "2025-01-08T15:30:00Z",
-  "message": "Payment processed",
-  "correlation_id": "550e8400-e29b-41d4-a716-446655440000",
-  "amount": 100.50,
-  "processor": "credit_card",
-  "duration_ms": 45
-}
-```
 
 ## 🔧 Desenvolvimento
 
@@ -266,22 +230,6 @@ type Config struct {
 | `MAX_DB_CONNECTIONS` | Máximo de conexões com DB | `25` |
 | `CIRCUIT_BREAKER_THRESHOLD` | Limite do circuit breaker | `5` |
 
-### Executando Testes
-
-```bash
-# Testes unitários
-go test ./...
-
-# Testes com coverage
-go test -cover ./...
-
-# Testes de integração
-go test -tags=integration ./...
-
-# Benchmark
-go test -bench=. ./...
-```
-
 ## 📈 Estratégias de Escalabilidade
 
 1. **Horizontal Scaling**: Múltiplas instâncias da aplicação
@@ -289,14 +237,6 @@ go test -bench=. ./...
 3. **Queue Management**: Auto-scaling baseado em backlog
 4. **Circuit Breakers**: Proteção contra cascata de falhas
 5. **Graceful Degradation**: Funcionalidade reduzida em sobrecarga
-
-## 🤝 Contribuição
-
-1. Fork o projeto
-2. Crie uma branch para sua feature (`git checkout -b feature/AmazingFeature`)
-3. Commit suas mudanças (`git commit -m 'Add some AmazingFeature'`)
-4. Push para a branch (`git push origin feature/AmazingFeature`)
-5. Abra um Pull Request
 
 ### Padrões de Código
 
