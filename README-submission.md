@@ -1,7 +1,7 @@
 # Rinha de Backend 2025 - Payment Processor
 
 **Participante:** João Antonio Barcelos Coutinho Neto 
-**Repositório do código fonte:** https://github.com/jabcn/rinha-backend-2025
+**Repositório do código fonte:** https://github.com/jabcneto/rinha-de-backend-2025
 
 ## 🚀 Tecnologias Utilizadas
 
