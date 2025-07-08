@@ -1,0 +1,11 @@
+{
+    "name": "João Antonio Barcelos Coutinho Neto",
+    "social": ["https://github.com/jabcn"],
+    "source-code-repo": "https://github.com/jabcn/rinha-backend-2025",
+    "langs": ["go"],
+    "storages": ["postgresql"],
+    "messaging": [],
+    "load-balancers": ["nginx"],
+    "other-technologies": ["docker", "gorilla-mux", "uuid", "circuit-breaker", "auto-scaling"]
+}
+
