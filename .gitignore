@@ -1,0 +1,220 @@
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+rinha-backend-clean
+/bin/
+/dist/
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool, specifically when used with LiteIDE
+*.out
+
+# Dependency directories (remove the comment below to include it)
+# vendor/
+
+# Go workspace file
+go.work
+go.work.sum
+
+# IDE and Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Environment variables and secrets
+.env
+.env.local
+.env.development
+.env.test
+.env.production
+*.env
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Log files
+*.log
+logs/
+*.log.*
+
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# Coverage directory used by tools like istanbul
+coverage/
+*.lcov
+
+# Docker files (optional, depending on your workflow)
+# docker-compose.override.yml
+# .dockerignore
+
+# Temporary files
+tmp/
+temp/
+.tmp/
+
+# Build artifacts
+build/
+out/
+target/
+
+# Configuration files that might contain secrets
+config.json
+config.yaml
+config.yml
+secrets.json
+
+# Performance and profiling files
+*.prof
+*.pprof
+*.trace
+
+# Documentation build files
+docs/_build/
+
+# Backup files
+*.bak
+*.backup
+*.old
+
+# Local development files
+.local/
+local.properties
+
+# Cloud provider configuration files
+.aws/
+.gcp/
+.azure/
+
+# Kubernetes local files
+*.kubeconfig
+k8s-local/
+
+# Helm charts
+charts/
+
+# Certificate files
+*.pem
+*.key
+*.crt
+*.p12
+
+# Development databases
+dev.db
+test.db
+
+# Air live reload tool
+.air.toml
+
+# Delve debugger
+__debug_bin
+
+# Go module download cache
+$GOPATH/pkg/mod/
+
+# JetBrains IDEs
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# Visual Studio Code
+.vscode/
+*.code-workspace
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# Vim
+[._]*.s[a-v][a-z]
+[._]*.sw[a-p]
+[._]s[a-rt-v][a-z]
+[._]ss[a-gi-z]
+[._]sw[a-p]
+
+# Emacs
+*~
+\#*\#
+/.emacs.desktop
+/.emacs.desktop.lock
+*.elc
+auto-save-list
+tramp
+.\#*
+
+# Tags
+TAGS
+tags
+.tags
+.tags1
+
+# Local history
+.history/
+
+# Binary archives
+*.tar.gz
+*.zip
+*.rar
+*.7z
+
+# Node.js (if using any Node tools)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Python (if using any Python tools)
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Monitoring and observability
+prometheus/
+grafana/
+jaeger/
+
+# Local testing and benchmark results
+benchmark_results/
+load_test_results/
+
+# Security scanning results
+*.sarif
+security-report.*
+
+# Package files
+*.deb
+*.rpm
+*.pkg
+*.dmg
+*.msi
+
+# Application specific
+payments.db
+rinha-data/

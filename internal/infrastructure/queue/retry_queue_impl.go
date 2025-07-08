@@ -264,7 +264,7 @@ func (rq *RetryQueueImpl) processDefaultRetry(payment *entities.Payment, process
 
 	// Payment processed successfully
 	log.Printf("Pagamento %s reprocessado com sucesso no processador %s", payment.CorrelationID, processorType)
-	payment.Status = entities.PaymentStatusCompleted
+	payment.Status = entities.PaymentStatusProcessed
 	payment.ProcessorType = processorType
 	now := time.Now()
 	payment.ProcessedAt = &now
@@ -330,7 +330,7 @@ func (rq *RetryQueueImpl) processFallbackRetry(payment *entities.Payment, proces
 
 	// Payment processed successfully
 	log.Printf("Pagamento %s reprocessado com sucesso no processador %s", payment.CorrelationID, processorType)
-	payment.Status = entities.PaymentStatusCompleted
+	payment.Status = entities.PaymentStatusProcessed
 	payment.ProcessorType = processorType
 	now := time.Now()
 	payment.ProcessedAt = &now
@@ -413,7 +413,7 @@ func (rq *RetryQueueImpl) processPermanentRetry(payment *entities.Payment, proce
 
 	// Payment processed successfully
 	log.Printf("Pagamento %s reprocessado com sucesso no processador %s", payment.CorrelationID, processorType)
-	payment.Status = entities.PaymentStatusCompleted
+	payment.Status = entities.PaymentStatusProcessed
 	payment.ProcessorType = processorType
 	now := time.Now()
 	payment.ProcessedAt = &now

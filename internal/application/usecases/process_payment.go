@@ -43,13 +43,20 @@ func (uc *ProcessPaymentUseCase) Execute(ctx context.Context, req *dtos.PaymentR
 	// Create payment entity
 	payment := entities.NewPayment(correlationID, req.Amount)
 
-	// Enqueue payment for async processing
-	if err := uc.queueService.Enqueue(ctx, payment); err != nil {
-		log.Printf("Erro ao enfileirar pagamento %s: %v", payment.CorrelationID, err)
+	// Save payment immediately to database with PENDING status
+	if err := uc.paymentRepo.Save(ctx, payment); err != nil {
+		log.Printf("Erro ao salvar pagamento %s no banco: %v", payment.CorrelationID, err)
 		return nil, err
 	}
 
-	log.Printf("Pagamento recebido e enfileirado: %s - R$ %.2f", payment.CorrelationID, payment.Amount)
+	// Enqueue payment for async processing
+	if err := uc.queueService.Enqueue(ctx, payment); err != nil {
+		log.Printf("Erro ao enfileirar pagamento %s: %v", payment.CorrelationID, err)
+		// Even if enqueue fails, payment is already saved in DB
+		return nil, err
+	}
+
+	log.Printf("Pagamento salvo e enfileirado: %s - R$ %.2f", payment.CorrelationID, payment.Amount)
 
 	// Return success response
 	return &dtos.PaymentResponse{

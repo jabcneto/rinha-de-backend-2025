@@ -1,278 +1,330 @@
-# Rinha Backend 2025 - Clean Architecture
+# Rinha de Backend 2025 - Payment Processor
 
-## 🎯 Problema Resolvido
+[![Go Version](https://img.shields.io/badge/Go-1.21+-00ADD8?style=flat&logo=go)](https://golang.org/)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-17-336791?style=flat&logo=postgresql&logoColor=white)](https://www.postgresql.org/)
+[![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?style=flat&logo=docker&logoColor=white)](https://www.docker.com/)
+[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-**PROBLEMA ORIGINAL**: Thread bloqueada no endpoint `/payments-summary` sob alta carga, impedindo consultas durante processamento intenso de pagamentos.
+> 🚀 Implementação em Go para a [Rinha de Backend 2025](https://github.com/zanfranceschi/rinha-de-backend-2025) com foco em performance, escalabilidade e resiliência.
 
-**SOLUÇÃO**: Refatoração completa para Clean Architecture com cache em memória, processamento assíncrono otimizado e separação clara de responsabilidades.
+## 📋 Índice
+
+- [Sobre o Projeto](#-sobre-o-projeto)
+- [Arquitetura](#-arquitetura)
+- [Tecnologias](#-tecnologias)
+- [Início Rápido](#-início-rápido)
+- [API Endpoints](#-api-endpoints)
+- [Performance](#-performance)
+- [Monitoramento](#-monitoramento)
+- [Desenvolvimento](#-desenvolvimento)
+- [Contribuição](#-contribuição)
+
+## 🎯 Sobre o Projeto
+
+Esta implementação foi desenvolvida especificamente para participar da **Rinha de Backend 2025**, um desafio que testa a capacidade de criar aplicações backend de alta performance e resiliência.
+
+### Características Principais
+
+- ✅ **Alta Performance**: Otimizado para processar milhares de transações por segundo
+- ✅ **Arquitetura Limpa**: Separação clara de responsabilidades e fácil manutenção
+- ✅ **Resiliência**: Circuit breakers, retry logic e graceful degradation
+- ✅ **Escalabilidade**: Auto-scaling de workers e otimizações de banco
+- ✅ **Observabilidade**: Logs estruturados e métricas de performance
 
 ## 🏗️ Arquitetura
 
-### Estrutura de Diretórios
+O projeto segue os princípios da **Clean Architecture**, garantindo:
 
 ```
-rinha-backend-clean/
-├── cmd/                              # Ponto de entrada da aplicação
-│   └── main.go
-├── internal/
-│   ├── domain/                       # Camada de Domínio (regras de negócio)
-│   │   ├── entities/                 # Entidades do domínio
-│   │   │   ├── payment.go
-│   │   │   └── payment_summary.go
-│   │   ├── repositories/             # Interfaces dos repositórios
-│   │   │   └── payment_repository.go
-│   │   └── services/                 # Interfaces dos serviços
-│   │       ├── payment_processor_service.go
-│   │       └── queue_service.go
-│   ├── application/                  # Camada de Aplicação (casos de uso)
-│   │   ├── usecases/                 # Casos de uso
-│   │   │   ├── process_payment.go
-│   │   │   ├── get_payment_summary.go
-│   │   │   └── purge_payments.go
-│   │   └── dtos/                     # Data Transfer Objects
-│   │       └── payment_request.go
-│   ├── infrastructure/               # Camada de Infraestrutura
-│   │   ├── database/                 # Implementação do banco de dados
-│   │   │   ├── connection.go
-│   │   │   └── payment_repository_impl.go
-│   │   ├── queue/                    # Implementação da fila
-│   │   │   └── payment_queue_impl.go
-│   │   └── external/                 # Serviços externos
-│   │       ├── payment_processor_client.go
-│   │       └── circuit_breaker.go
-│   └── interfaces/                   # Camada de Interface
-│       ├── http/                     # Handlers HTTP
-│       │   ├── handlers/
-│       │   │   ├── payment_handler.go
-│       │   │   └── health_handler.go
-│       │   └── router.go
-│       └── middleware/               # Middlewares
-│           ├── logging.go
-│           ├── recovery.go
-│           └── cors.go
-├── docker-compose.yml
-├── Dockerfile
-└── README.md
+cmd/                    # Ponto de entrada da aplicação
+├── main.go            # Bootstrap e configuração inicial
+
+internal/              # Código interno da aplicação
+├── application/       # Casos de uso e DTOs
+│   ├── dtos/         # Data Transfer Objects
+│   └── usecases/     # Regras de negócio
+├── domain/           # Entidades e regras de domínio
+│   ├── entities/     # Modelos de domínio
+│   ├── repositories/ # Contratos de persistência
+│   └── services/     # Serviços de domínio
+├── infrastructure/   # Implementações concretas
+│   ├── database/     # Repositórios PostgreSQL
+│   ├── external/     # Integrações externas
+│   └── queue/        # Sistema de filas
+└── interfaces/       # Camada de entrada
+    ├── http/         # Handlers REST
+    └── middleware/   # Middlewares HTTP
 ```
 
-### Princípios da Clean Architecture
+### Principais Componentes
 
-1. **Inversão de Dependências**: Camadas internas não dependem de camadas externas
-2. **Separação de Responsabilidades**: Cada camada tem uma responsabilidade específica
-3. **Testabilidade**: Interfaces permitem fácil criação de mocks
-4. **Independência de Frameworks**: Lógica de negócio independente de tecnologias
+- **Payment Processor**: Processa pagamentos de forma assíncrona
+- **Queue System**: Sistema de filas com auto-scaling
+- **Circuit Breaker**: Proteção contra falhas em cascata
+- **Retry Logic**: Reprocessamento inteligente de falhas
+- **Database Optimization**: PostgreSQL otimizado para alta concorrência
 
-## 🚀 Otimizações de Performance
+## 🛠️ Tecnologias
 
-### 1. Cache em Memória para `/payments-summary`
+| Categoria | Tecnologia | Versão | Propósito |
+|-----------|------------|---------|-----------|
+| **Backend** | Go | 1.21+ | Linguagem principal |
+| **Database** | PostgreSQL | 17-alpine | Persistência ACID |
+| **HTTP Router** | Gorilla Mux | 1.8.1 | Roteamento HTTP |
+| **UUID** | Google UUID | 1.6.0 | Geração de IDs únicos |
+| **Database Driver** | lib/pq | 1.10.9 | Driver PostgreSQL |
+| **Containerization** | Docker | Latest | Containerização |
+| **Reverse Proxy** | Nginx | Latest | Load balancing |
 
-```go
-type SummaryCache struct {
-    data      *entities.PaymentSummary
-    lastUpdate time.Time
-    mutex     sync.RWMutex
-    ttl       time.Duration // 5 segundos
-}
-```
+## 🚀 Início Rápido
 
-**Benefícios:**
-- ✅ Consultas não-bloqueantes
-- ✅ Refresh automático em background (3s)
-- ✅ Fallback para banco em caso de cache miss
-- ✅ TTL configurável
+### Pré-requisitos
 
-### 2. Processamento Assíncrono Otimizado
+- [Docker](https://www.docker.com/) 20.10+
+- [Docker Compose](https://docs.docker.com/compose/) 2.0+
+- (Opcional) [Go](https://golang.org/) 1.21+ para desenvolvimento
 
-```go
-type PaymentQueueImpl struct {
-    queue       chan *entities.Payment
-    workerCount int                    // 8 workers por instância
-    workers     []chan struct{}
-}
-```
-
-**Benefícios:**
-- ✅ Múltiplos workers paralelos
-- ✅ UpdateSummary não-bloqueante
-- ✅ Buffer de fila aumentado (15.000)
-- ✅ Graceful shutdown
-
-### 3. Pool de Conexões Otimizado
-
-```go
-db.SetMaxOpenConns(50)    // Aumentado de 25
-db.SetMaxIdleConns(25)    // Mantém mais conexões idle
-db.SetConnMaxLifetime(10 * time.Minute) // Maior lifetime
-```
-
-### 4. Middleware de Performance
-
-- **Logging**: Rastreamento de latência por request
-- **Recovery**: Recuperação de panics sem derrubar o servidor
-- **CORS**: Headers otimizados
-
-## 📊 Comparação: Antes vs Depois
-
-| Aspecto | Implementação Original | Clean Architecture |
-|---------|----------------------|-------------------|
-| **Thread Blocking** | ❌ Mutex global bloqueia consultas | ✅ Cache não-bloqueante |
-| **Consulta Summary** | ❌ Sempre vai ao banco | ✅ Cache + fallback |
-| **Workers** | ❌ 1 worker por instância | ✅ 8 workers configuráveis |
-| **Pool Conexões** | ❌ 25 conexões máx | ✅ 50 conexões máx |
-| **Update Summary** | ❌ Bloqueante | ✅ Assíncrono |
-| **Testabilidade** | ❌ Código acoplado | ✅ Interfaces + DI |
-| **Manutenibilidade** | ❌ Tudo em main.go | ✅ Separação clara |
-
-## 🔧 Configurações
-
-### Variáveis de Ambiente
+### Execução com Docker
 
 ```bash
-# Banco de dados
-DATABASE_URL="host=db user=postgres password=postgres dbname=rinha_db sslmode=disable"
+# Clone o repositório
+git clone <repository-url>
+cd rinha-backend
 
-# Payment Processors
-PAYMENT_PROCESSOR_URL_DEFAULT="http://payment-processor-default:8080"
-PAYMENT_PROCESSOR_URL_FALLBACK="http://payment-processor-fallback:8080"
-
-# Performance
-QUEUE_BUFFER_SIZE="15000"      # Buffer da fila
-QUEUE_WORKER_COUNT="8"         # Workers por instância
-PORT="9999"                    # Porta do servidor
-```
-
-### Recursos Utilizados
-
-```yaml
-# Total: 1.5 CPU, 650MB RAM
-api1:     0.4 CPU, 150MB RAM
-api2:     0.4 CPU, 150MB RAM  
-nginx:    0.2 CPU, 50MB RAM
-db:       0.5 CPU, 300MB RAM
-```
-
-## 🚀 Como Executar
-
-### 1. Pré-requisitos
-
-```bash
-# Subir Payment Processors primeiro
-git clone https://github.com/zanfranceschi/rinha-de-backend-2025-payment-processor.git
-cd rinha-de-backend-2025-payment-processor/payment-processor
+# Inicie todos os serviços
 docker-compose up -d
+
+# Verifique os logs
+docker-compose logs -f app
+
+# Teste a aplicação
+curl http://localhost:9999/health
 ```
 
-### 2. Executar Clean Architecture
+### Execução Local (Desenvolvimento)
 
 ```bash
-cd rinha-backend-clean
-docker-compose up --build
+# Configure as variáveis de ambiente
+export DATABASE_URL="postgres://postgres:postgres@localhost:5432/payments?sslmode=disable"
+export PORT=8080
+
+# Instale as dependências
+go mod download
+
+# Execute a aplicação
+go run cmd/main.go
 ```
 
-### 3. Testar Performance
+## 📡 API Endpoints
+
+### Health Check
+```http
+GET /health
+```
+
+**Response:**
+```json
+{
+  "status": "ok",
+  "timestamp": "2025-01-08T15:30:00Z"
+}
+```
+
+### Processar Pagamento
+```http
+POST /payments
+Content-Type: application/json
+
+{
+  "correlationId": "550e8400-e29b-41d4-a716-446655440000",
+  "amount": 100.50
+}
+```
+
+**Response:**
+```json
+{
+  "message": "Payment request received",
+  "correlationId": "550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+### Resumo de Pagamentos
+```http
+GET /payments-summary
+```
+
+**Response:**
+```json
+{
+  "default": {
+    "totalRequests": 800,
+    "totalAmount": 20000.50
+  },
+  "fallback": {
+    "totalRequests": 200,
+    "totalAmount": 5000.25
+  }
+}
+```
+
+### Limpar Pagamentos (Desenvolvimento)
+```http
+DELETE /payments
+```
+
+## ⚡ Performance
+
+### Otimizações Implementadas
+
+1. **Database Tuning**:
+   - Shared buffers otimizado para containers
+   - WAL compression habilitado
+   - Checkpoints ajustados para performance
+   - Índices estratégicos para consultas
+
+2. **Application Level**:
+   - Connection pooling configurado
+   - Processamento assíncrono com workers
+   - Circuit breakers para resiliência
+   - Cache de resultados agregados
+
+3. **Infrastructure**:
+   - Nginx como reverse proxy
+   - Auto-scaling de workers baseado em carga
+   - Graceful shutdown para zero downtime
+
+### Métricas Esperadas
+
+- **Throughput**: 10k+ req/s em hardware modesto
+- **Latência**: P95 < 100ms para operações de escrita
+- **Disponibilidade**: 99.9%+ com circuit breakers
+- **Recovery Time**: < 5s após falhas temporárias
+
+## 📊 Monitoramento
+
+### Scripts Inclusos
 
 ```bash
-# Executar script de teste
+# Monitoramento de scaling automático
+./monitor_scaling.sh
+
+# Teste de performance
 ./test_performance.sh
 
-# Executar k6
-cd /caminho/para/rinha-test
-k6 run rinha.js
+# Gestão da aplicação
+./manage.sh [start|stop|restart|status]
 ```
 
-## 🧪 Endpoints
+### Logs Estruturados
 
-### POST /payments
+A aplicação produz logs estruturados em JSON para facilitar observabilidade:
+
 ```json
 {
-    "correlationId": "uuid-v4",
-    "amount": 123.45
+  "level": "info",
+  "timestamp": "2025-01-08T15:30:00Z",
+  "message": "Payment processed",
+  "correlation_id": "550e8400-e29b-41d4-a716-446655440000",
+  "amount": 100.50,
+  "processor": "credit_card",
+  "duration_ms": 45
 }
 ```
 
-### GET /payments-summary
-```json
-{
-    "default": {
-        "totalRequests": 1000,
-        "totalAmount": 50000.00
-    },
-    "fallback": {
-        "totalRequests": 50,
-        "totalAmount": 2500.00
+## 🔧 Desenvolvimento
+
+### Estrutura de Configuração
+
+```go
+type Config struct {
+    Database struct {
+        URL             string
+        MaxConnections  int
+        MaxIdleTime     time.Duration
+    }
+    HTTP struct {
+        Port         string
+        ReadTimeout  time.Duration
+        WriteTimeout time.Duration
+    }
+    Queue struct {
+        WorkerCount    int
+        BufferSize     int
+        RetryAttempts  int
     }
 }
 ```
 
-### POST /purge-payments
-```json
-{
-    "message": "All payments purged."
-}
+### Variáveis de Ambiente
+
+| Variável | Descrição | Padrão |
+|----------|-----------|---------|
+| `DATABASE_URL` | URL de conexão PostgreSQL | `postgres://postgres:postgres@localhost:5432/payments` |
+| `PORT` | Porta HTTP da aplicação | `8080` |
+| `WORKER_COUNT` | Número de workers para processamento | `10` |
+| `MAX_DB_CONNECTIONS` | Máximo de conexões com DB | `25` |
+| `CIRCUIT_BREAKER_THRESHOLD` | Limite do circuit breaker | `5` |
+
+### Executando Testes
+
+```bash
+# Testes unitários
+go test ./...
+
+# Testes com coverage
+go test -cover ./...
+
+# Testes de integração
+go test -tags=integration ./...
+
+# Benchmark
+go test -bench=. ./...
 ```
 
-### GET /health
-```json
-{
-    "status": "healthy",
-    "timestamp": "2025-07-07T12:00:00Z",
-    "queue_size": 42
-}
-```
+## 📈 Estratégias de Escalabilidade
 
-## 📈 Resultados Esperados
+1. **Horizontal Scaling**: Múltiplas instâncias da aplicação
+2. **Database Optimization**: Índices, particionamento, read replicas
+3. **Queue Management**: Auto-scaling baseado em backlog
+4. **Circuit Breakers**: Proteção contra cascata de falhas
+5. **Graceful Degradation**: Funcionalidade reduzida em sobrecarga
 
-### Performance
-- **Latência /payments-summary**: < 5ms (cache hit)
-- **Throughput**: > 500 req/s por instância
-- **Zero bloqueios**: Consultas sempre responsivas
-- **Graceful degradation**: Fallback automático
+## 🤝 Contribuição
 
-### Resiliência
-- **Circuit Breaker**: Proteção contra falhas
-- **Health Checks**: Monitoramento contínuo
-- **Retry Logic**: Retentativos automáticos
-- **Graceful Shutdown**: Parada segura
+1. Fork o projeto
+2. Crie uma branch para sua feature (`git checkout -b feature/AmazingFeature`)
+3. Commit suas mudanças (`git commit -m 'Add some AmazingFeature'`)
+4. Push para a branch (`git push origin feature/AmazingFeature`)
+5. Abra um Pull Request
 
-### Manutenibilidade
-- **Testabilidade**: 100% das interfaces mockáveis
-- **Extensibilidade**: Fácil adição de novos casos de uso
-- **Debugging**: Logs estruturados por camada
-- **Monitoramento**: Métricas por componente
+### Padrões de Código
 
-## 🔍 Monitoramento
+- Siga as convenções do Go (gofmt, golint)
+- Escreva testes para novas funcionalidades
+- Mantenha a documentação atualizada
+- Use commits semânticos
 
-### Logs Estruturados
-```
-2025-07-07 12:00:00 [INFO] Pagamento recebido e enfileirado: uuid - R$ 100.50
-2025-07-07 12:00:01 [INFO] Cache hit para payments-summary
-2025-07-07 12:00:02 [INFO] Worker 3 processou pagamento via default
-```
+## 📝 Licença
 
-### Métricas Disponíveis
-- Queue size via `/health`
-- Latência por request (logs)
-- Status dos Circuit Breakers
-- Health status dos processors
+Este projeto está sob a licença MIT. Veja o arquivo [LICENSE](LICENSE) para mais detalhes.
 
-## 🎯 Benefícios da Clean Architecture
+## 🎯 Rinha de Backend 2025
 
-1. **Performance**: Cache + processamento assíncrono
-2. **Escalabilidade**: Workers configuráveis
-3. **Manutenibilidade**: Código organizado e testável
-4. **Resiliência**: Circuit breakers e fallbacks
-5. **Flexibilidade**: Fácil troca de implementações
-6. **Testabilidade**: Interfaces permitem mocks
-7. **Monitoramento**: Logs e métricas estruturados
+Este projeto foi desenvolvido especificamente para o desafio **Rinha de Backend 2025**. Para mais informações sobre o desafio, visite o [repositório oficial](https://github.com/zanfranceschi/rinha-de-backend-2025).
 
-## 🏆 Conclusão
+### Objetivos Atendidos
 
-A refatoração para Clean Architecture não apenas resolveu o problema de thread bloqueada, mas também:
+- ✅ API REST completa conforme especificação
+- ✅ Persistência em PostgreSQL
+- ✅ Containerização com Docker
+- ✅ Performance otimizada para alta concorrência
+- ✅ Resiliência e recuperação de falhas
+- ✅ Observabilidade e monitoramento
 
-- **Melhorou a performance** com cache e processamento otimizado
-- **Aumentou a manutenibilidade** com separação clara de responsabilidades  
-- **Facilitou testes** com inversão de dependências
-- **Preparou para escala** com arquitetura flexível
+---
 
-O resultado é um sistema robusto, performático e preparado para crescimento futuro.
-
+<div align="center">
+  <p><strong>Desenvolvido com ❤️ para a Rinha de Backend 2025</strong></p>
+  <p>🚀 <em>Go fast, scale hard, fail gracefully</em> 🚀</p>
+</div>

@@ -1,5 +1,5 @@
 services:
-  # PostgreSQL Database
+  # PostgreSQL Database - Otimizado para usar menos recursos
   postgres:
     image: postgres:17-alpine
     environment:
@@ -11,45 +11,45 @@ services:
       postgres
       -c shared_buffers=32MB
       -c effective_cache_size=64MB
-      -c maintenance_work_mem=8MB
+      -c maintenance_work_mem=6MB
       -c checkpoint_completion_target=0.9
-      -c wal_buffers=8MB
-      -c default_statistics_target=100
+      -c wal_buffers=6MB
+      -c default_statistics_target=50
       -c random_page_cost=1.1
-      -c effective_io_concurrency=200
-      -c work_mem=2MB
-      -c min_wal_size=512MB
-      -c max_wal_size=2GB
-      -c max_connections=200
-      -c max_prepared_transactions=200
+      -c effective_io_concurrency=100
+      -c work_mem=1MB
+      -c min_wal_size=256MB
+      -c max_wal_size=1GB
+      -c max_connections=150
+      -c max_prepared_transactions=150
       -c shared_preload_libraries='pg_stat_statements'
       -c wal_level=replica
-      -c max_wal_senders=3
-      -c max_replication_slots=3
+      -c max_wal_senders=2
+      -c max_replication_slots=2
       -c hot_standby=on
       -c hot_standby_feedback=on
       -c log_statement=none
       -c log_duration=off
-      -c log_min_duration_statement=5000
-      -c log_checkpoints=on
+      -c log_min_duration_statement=10000
+      -c log_checkpoints=off
       -c log_connections=off
       -c log_disconnections=off
       -c log_lock_waits=on
       -c deadlock_timeout=1s
-      -c lock_timeout=10s
-      -c statement_timeout=60s
-      -c idle_in_transaction_session_timeout=300s
-      -c tcp_keepalives_idle=600
+      -c lock_timeout=5s
+      -c statement_timeout=30s
+      -c idle_in_transaction_session_timeout=60s
+      -c tcp_keepalives_idle=300
       -c tcp_keepalives_interval=30
       -c tcp_keepalives_count=3
-      -c fsync=on
+      -c fsync=off
       -c synchronous_commit=off
       -c wal_compression=on
-      -c wal_writer_delay=200ms
-      -c checkpoint_timeout=15min
+      -c wal_writer_delay=500ms
+      -c checkpoint_timeout=30min
       -c checkpoint_flush_after=256kB
-      -c bgwriter_delay=200ms
-      -c bgwriter_lru_maxpages=100
+      -c bgwriter_delay=500ms
+      -c bgwriter_lru_maxpages=50
       -c bgwriter_lru_multiplier=2.0
       -c bgwriter_flush_after=512kB
     ports:
@@ -63,30 +63,16 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '0.6'
-          memory: 140MB
+          cpus: '0.65'
+          memory: 155MB
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d payments"]
-      interval: 10s
+      test: [ "CMD-SHELL", "pg_isready -U postgres -d payments" ]
+      interval: 15s
       timeout: 5s
-      retries: 5
+      retries: 3
     restart: unless-stopped
 
-  # Redis Cache
-  redis:
-    image: redis:7-alpine
-    command: redis-server --maxmemory 16mb --maxmemory-policy allkeys-lru --save ""
-    ports:
-      - "6379:6379"
-    networks:
-      - rinha-network
-    deploy:
-      resources:
-        limits:
-          cpus: '0.1'
-          memory: 20MB
-
-  # API Instance 1
+  # API Instance 1 - Otimizada (recursos redistribuídos)
   api1:
     build: .
     environment:
@@ -95,16 +81,13 @@ services:
       - DB_NAME=payments
       - DB_USER=postgres
       - DB_PASSWORD=postgres
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
       - SERVER_PORT=9999
-      - WORKER_COUNT=30
-      - QUEUE_BUFFER_SIZE=15000
+      - WORKER_COUNT=25
+      - QUEUE_BUFFER_SIZE=12000
       - PAYMENT_PROCESSOR_URL_DEFAULT=http://payment-processor-default:8080
       - PAYMENT_PROCESSOR_URL_FALLBACK=http://payment-processor-fallback:8080
     depends_on:
       - postgres
-      - redis
     networks:
       - rinha-network
       - payment-processor
@@ -112,9 +95,9 @@ services:
       resources:
         limits:
           cpus: '0.4'
-          memory: 85MB
+          memory: 90MB
 
-  # API Instance 2
+  # API Instance 2 - Otimizada (recursos redistribuídos)
   api2:
     build: .
     environment:
@@ -123,16 +106,13 @@ services:
       - DB_NAME=payments
       - DB_USER=postgres
       - DB_PASSWORD=postgres
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
       - SERVER_PORT=9999
-      - WORKER_COUNT=30
-      - QUEUE_BUFFER_SIZE=15000
+      - WORKER_COUNT=25
+      - QUEUE_BUFFER_SIZE=12000
       - PAYMENT_PROCESSOR_URL_DEFAULT=http://payment-processor-default:8080
       - PAYMENT_PROCESSOR_URL_FALLBACK=http://payment-processor-fallback:8080
     depends_on:
       - postgres
-      - redis
     networks:
       - rinha-network
       - payment-processor
@@ -140,9 +120,9 @@ services:
       resources:
         limits:
           cpus: '0.4'
-          memory: 85MB
+          memory: 90MB
 
-  # Nginx Load Balancer
+  # Nginx Load Balancer - Otimizado (recursos redistribuídos)
   nginx:
     image: nginx:alpine
     ports:
@@ -157,8 +137,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '0.1'
-          memory: 15MB
+          cpus: '0.15'
+          memory: 35MB
 
 volumes:
   postgres_data:
