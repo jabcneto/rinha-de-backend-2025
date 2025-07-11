@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strconv"
 	"sync"
 	"time"
 
@@ -55,12 +56,15 @@ type HealthCheckResponse struct {
 	MinResponseTime int64 `json:"minResponseTime"`
 }
 
-const (
-	HealthCheckPath            = "/payments/service-health"
-	PaymentsPath               = "/payments"
-	HealthCheckInterval        = 15 * time.Second
+var (
+	HealthCheckInterval        = 100 * time.Millisecond
 	CircuitBreakerMaxFailures  = 10
-	CircuitBreakerResetTimeout = 2 * time.Second
+	CircuitBreakerResetTimeout = 100 * time.Millisecond
+)
+
+const (
+	HealthCheckPath = "/payments/service-health"
+	PaymentsPath    = "/payments"
 )
 
 // NewPaymentProcessorClient creates a new payment processor client
@@ -78,18 +82,18 @@ func NewPaymentProcessorClient() services.PaymentProcessorService {
 
 	// Create optimized HTTP client with connection pooling
 	transport := &http.Transport{
-		MaxIdleConns:          100,              // Pool de conexões idle
-		MaxIdleConnsPerHost:   50,               // Por host
-		MaxConnsPerHost:       100,              // Máximo de conexões por host
-		IdleConnTimeout:       90 * time.Second, // Timeout para conexões idle
-		TLSHandshakeTimeout:   10 * time.Second,
-		ExpectContinueTimeout: 1 * time.Second,
+		MaxIdleConns:          100,                    // Pool de conexões idle
+		MaxIdleConnsPerHost:   50,                     // Por host
+		MaxConnsPerHost:       100,                    // Máximo de conexões por host
+		IdleConnTimeout:       100 * time.Millisecond, // Timeout para conexões idle
+		TLSHandshakeTimeout:   100 * time.Millisecond,
+		ExpectContinueTimeout: 100 * time.Millisecond,
 		DisableKeepAlives:     false, // Manter conexões vivas
 		DisableCompression:    true,  // Desabilitar compressão para performance
 	}
 
 	client := &http.Client{
-		Timeout:   3 * time.Second, // Reduzido de 5s para 3s
+		Timeout:   100 * time.Millisecond, // Reduzido para 100ms
 		Transport: transport,
 	}
 
@@ -183,30 +187,49 @@ func (c *PaymentProcessorClient) sendPaymentToURL(ctx context.Context, targetURL
 		return fmt.Errorf("erro ao serializar payload de pagamento: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", targetURL+PaymentsPath, bytes.NewBuffer(payload))
-	if err != nil {
-		return fmt.Errorf("erro ao criar requisição: %w", err)
-	}
+	maxRetries := 3
+	backoff := 100 * time.Millisecond
 
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := c.client.Do(req)
-	if err != nil {
-		return fmt.Errorf("erro ao enviar pagamento para %s: %w", targetURL, err)
-	}
-	defer func() {
-		if cerr := resp.Body.Close(); cerr != nil {
-			logger.Warnf("Erro ao fechar o corpo da resposta: %v", cerr)
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		req, err := http.NewRequestWithContext(ctx, "POST", targetURL+PaymentsPath, bytes.NewBuffer(payload))
+		if err != nil {
+			return fmt.Errorf("erro ao criar requisição: %w", err)
 		}
-	}()
+		req.Header.Set("Content-Type", "application/json")
 
-	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		logger.Infof("Pagamento %s processado com sucesso por %s", request.CorrelationID, targetURL)
-		return nil
+		resp, err := c.client.Do(req)
+		if err != nil {
+			return fmt.Errorf("erro ao enviar pagamento para %s: %w", targetURL, err)
+		}
+		defer func() {
+			if cerr := resp.Body.Close(); cerr != nil {
+				logger.Warnf("Erro ao fechar o corpo da resposta: %v", cerr)
+			}
+		}()
+
+		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+			logger.Infof("Pagamento %s processado com sucesso por %s", request.CorrelationID, targetURL)
+			return nil
+		}
+
+		if resp.StatusCode == 429 {
+			retryAfter := resp.Header.Get("Retry-After")
+			wait := backoff
+			if retryAfter != "" {
+				if secs, err := strconv.Atoi(retryAfter); err == nil {
+					wait = time.Duration(secs) * 100 * time.Millisecond
+				}
+			}
+			logger.Warnf("Recebido 429 do processador %s. Aguardando %v antes de tentar novamente...", targetURL, wait)
+			time.Sleep(wait)
+			backoff *= 2
+			continue
+		}
+
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("processador de pagamento %s retornou status %d: %s", targetURL, resp.StatusCode, string(bodyBytes))
 	}
-
-	bodyBytes, _ := io.ReadAll(resp.Body)
-	return fmt.Errorf("processador de pagamento %s retornou status %d: %s", targetURL, resp.StatusCode, string(bodyBytes))
+	return fmt.Errorf("falha ao enviar pagamento para %s após %d tentativas", targetURL, maxRetries)
 }
 
 // GetHealthStatus returns the health status of processors

@@ -4,9 +4,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
 	"time"
 
+	"github.com/valyala/fasthttp"
 	"rinha-backend-clean/internal/application/dtos"
 	"rinha-backend-clean/internal/application/usecases"
 	"rinha-backend-clean/internal/infrastructure/logger"
@@ -33,34 +33,34 @@ func NewPaymentHandler(
 }
 
 // HandlePayments handles POST /payments requests
-func (h *PaymentHandler) HandlePayments(w http.ResponseWriter, r *http.Request) {
+func (h *PaymentHandler) HandlePayments(ctx *fasthttp.RequestCtx) {
 	var req dtos.PaymentRequest
 
 	// Parse JSON request
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.Unmarshal(ctx.PostBody(), &req); err != nil {
 		logger.WithField("error", err.Error()).
-			WithField("path", r.URL.Path).
+			WithField("path", string(ctx.Path())).
 			Warn("Invalid JSON in payment request")
-		h.writeErrorResponse(w, "Invalid JSON", http.StatusBadRequest)
+		h.writeErrorResponse(ctx, "Invalid JSON", fasthttp.StatusBadRequest)
 		return
 	}
 
 	// Execute use case
-	response, err := h.processPaymentUC.Execute(r.Context(), &req)
+	response, err := h.processPaymentUC.Execute(ctx, &req)
 	if err != nil {
 		var validationErr *dtos.ValidationError
 		if errors.As(err, &validationErr) {
 			logger.WithField("validation_error", validationErr.Message).
 				WithField("payment_id", req.CorrelationID).
 				Warn("Payment validation failed")
-			h.writeErrorResponse(w, validationErr.Message, http.StatusBadRequest)
+			h.writeErrorResponse(ctx, validationErr.Message, fasthttp.StatusBadRequest)
 			return
 		}
 
 		logger.WithError(err).
 			WithField("payment_id", req.CorrelationID).
 			Error("Failed to process payment")
-		h.writeErrorResponse(w, "Internal server error", http.StatusInternalServerError)
+		h.writeErrorResponse(ctx, "Internal server error", fasthttp.StatusInternalServerError)
 		return
 	}
 
@@ -68,32 +68,34 @@ func (h *PaymentHandler) HandlePayments(w http.ResponseWriter, r *http.Request) 
 	logger.WithField("payment_id", req.CorrelationID).
 		WithField("status", "accepted").
 		Info("Payment request accepted")
-	h.writeJSONResponse(w, response, http.StatusAccepted)
+	h.writeJSONResponse(ctx, response, fasthttp.StatusAccepted)
 }
 
 // HandlePaymentsSummary handles GET /payments-summary requests
-func (h *PaymentHandler) HandlePaymentsSummary(w http.ResponseWriter, r *http.Request) {
+func (h *PaymentHandler) HandlePaymentsSummary(ctx *fasthttp.RequestCtx) {
 	// Parse query parameters
 	req := &dtos.PaymentSummaryRequest{}
 
-	if fromStr := r.URL.Query().Get("from"); fromStr != "" {
+	fromStr := string(ctx.QueryArgs().Peek("from"))
+	if fromStr != "" {
 		if parsed, err := h.parseTimestamp(fromStr); err != nil {
 			logger.WithField("timestamp", fromStr).
 				WithField("error", err.Error()).
 				Warn("Invalid 'from' timestamp format")
-			h.writeErrorResponse(w, "Invalid 'from' timestamp format. Use yyyy-MM-ddTHH:mm:ss or ISO format.", http.StatusBadRequest)
+			h.writeErrorResponse(ctx, "Invalid 'from' timestamp format. Use yyyy-MM-ddTHH:mm:ss or ISO format.", fasthttp.StatusBadRequest)
 			return
 		} else {
 			req.From = &parsed
 		}
 	}
 
-	if toStr := r.URL.Query().Get("to"); toStr != "" {
+	toStr := string(ctx.QueryArgs().Peek("to"))
+	if toStr != "" {
 		if parsed, err := h.parseTimestamp(toStr); err != nil {
 			logger.WithField("timestamp", toStr).
 				WithField("error", err.Error()).
 				Warn("Invalid 'to' timestamp format")
-			h.writeErrorResponse(w, "Invalid 'to' timestamp format. Use yyyy-MM-ddTHH:mm:ss or ISO format.", http.StatusBadRequest)
+			h.writeErrorResponse(ctx, "Invalid 'to' timestamp format. Use yyyy-MM-ddTHH:mm:ss or ISO format.", fasthttp.StatusBadRequest)
 			return
 		} else {
 			req.To = &parsed
@@ -101,45 +103,47 @@ func (h *PaymentHandler) HandlePaymentsSummary(w http.ResponseWriter, r *http.Re
 	}
 
 	// Execute use case (optimized with cache)
-	response, err := h.getPaymentSummaryUC.Execute(r.Context(), req)
+	response, err := h.getPaymentSummaryUC.Execute(ctx, req)
 	if err != nil {
 		logger.WithError(err).Error("Failed to get payment summary")
-		h.writeErrorResponse(w, "Internal server error", http.StatusInternalServerError)
+		h.writeErrorResponse(ctx, "Internal server error", fasthttp.StatusInternalServerError)
 		return
 	}
 
 	// Return JSON response
 	logger.Debug("Payment summary retrieved successfully")
-	h.writeJSONResponse(w, response, http.StatusOK)
+	h.writeJSONResponse(ctx, response, fasthttp.StatusOK)
 }
 
 // HandlePurgePayments handles POST /purge-payments requests
-func (h *PaymentHandler) HandlePurgePayments(w http.ResponseWriter, r *http.Request) {
+func (h *PaymentHandler) HandlePurgePayments(ctx *fasthttp.RequestCtx) {
 	// Execute use case
-	if err := h.purgePaymentsUC.Execute(r.Context()); err != nil {
+	if err := h.purgePaymentsUC.Execute(ctx); err != nil {
 		logger.WithError(err).Error("Failed to purge payments")
-		h.writeErrorResponse(w, "Internal server error", http.StatusInternalServerError)
+		h.writeErrorResponse(ctx, "Internal server error", fasthttp.StatusInternalServerError)
 		return
 	}
 
 	// Return success response
 	logger.Info("All payments purged successfully")
 	response := map[string]string{"message": "All payments purged."}
-	h.writeJSONResponse(w, response, http.StatusOK)
+	h.writeJSONResponse(ctx, response, fasthttp.StatusOK)
 }
 
 // writeJSONResponse writes a JSON response
-func (h *PaymentHandler) writeJSONResponse(w http.ResponseWriter, data interface{}, statusCode int) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(statusCode)
-	json.NewEncoder(w).Encode(data)
+func (h *PaymentHandler) writeJSONResponse(ctx *fasthttp.RequestCtx, data interface{}, statusCode int) {
+	ctx.SetStatusCode(statusCode)
+	ctx.SetContentType("application/json")
+	jsonBytes, _ := json.Marshal(data)
+	ctx.SetBody(jsonBytes)
 }
 
 // writeErrorResponse writes an error response
-func (h *PaymentHandler) writeErrorResponse(w http.ResponseWriter, message string, statusCode int) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(statusCode)
-	json.NewEncoder(w).Encode(map[string]string{"error": message})
+func (h *PaymentHandler) writeErrorResponse(ctx *fasthttp.RequestCtx, message string, statusCode int) {
+	ctx.SetStatusCode(statusCode)
+	ctx.SetContentType("application/json")
+	jsonBytes, _ := json.Marshal(map[string]string{"error": message})
+	ctx.SetBody(jsonBytes)
 }
 
 // parseTimestamp attempts to parse timestamp in multiple formats

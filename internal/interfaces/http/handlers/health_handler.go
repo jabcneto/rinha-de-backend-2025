@@ -1,11 +1,13 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
-	"net/http"
 	"time"
 
+	"github.com/valyala/fasthttp"
 	"rinha-backend-clean/internal/domain/services"
+	"rinha-backend-clean/internal/infrastructure/cache"
 	"rinha-backend-clean/internal/infrastructure/queue"
 )
 
@@ -14,6 +16,7 @@ type HealthHandler struct {
 	queueService      services.QueueService
 	retryQueueService services.RetryQueueService
 	autoScaler        *queue.AutoScaler
+	cache             *cache.RedisCache
 }
 
 // NewHealthHandler creates a new health handler
@@ -21,17 +24,26 @@ func NewHealthHandler(
 	queueService services.QueueService,
 	retryQueueService services.RetryQueueService,
 	autoScaler *queue.AutoScaler,
+	cache *cache.RedisCache,
 ) *HealthHandler {
 	return &HealthHandler{
 		queueService:      queueService,
 		retryQueueService: retryQueueService,
 		autoScaler:        autoScaler,
+		cache:             cache,
 	}
 }
 
 // HandleHealth handles GET /health requests
-func (h *HealthHandler) HandleHealth(w http.ResponseWriter, r *http.Request) {
-	// Get queue statistics
+func (h *HealthHandler) HandleHealth(ctx *fasthttp.RequestCtx) {
+	cacheKey := "health-check-result"
+	cached, err := h.cache.Get(context.Background(), cacheKey)
+	if err == nil && cached != "" {
+		ctx.SetContentType("application/json")
+		ctx.SetBodyString(cached)
+		return
+	}
+
 	queueStats := map[string]interface{}{
 		"queue_size": h.queueService.GetQueueSize(),
 	}
@@ -45,7 +57,7 @@ func (h *HealthHandler) HandleHealth(w http.ResponseWriter, r *http.Request) {
 		"queue_stats": queueStats,
 		"retry_stats": retryStats,
 		"scaling_metrics": map[string]interface{}{
-			"current_workers":     scalingMetrics.CurrentQueueSize, // This should be current workers count
+			"current_workers":     scalingMetrics.CurrentQueueSize,
 			"queue_utilization":   scalingMetrics.QueueUtilization,
 			"processing_rate":     scalingMetrics.ProcessingRate,
 			"worker_efficiency":   scalingMetrics.WorkerEfficiency,
@@ -54,21 +66,21 @@ func (h *HealthHandler) HandleHealth(w http.ResponseWriter, r *http.Request) {
 			"last_scaling_action": scalingMetrics.LastScalingDecision.Format(time.RFC3339),
 		},
 	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(response)
+	jsonResp, _ := json.Marshal(response)
+	h.cache.Set(context.Background(), cacheKey, string(jsonResp), 2*time.Second)
+	ctx.SetContentType("application/json")
+	ctx.SetBody(jsonResp)
 }
 
 // HandleScalingMetrics handles GET /scaling-metrics requests
-func (h *HealthHandler) HandleScalingMetrics(w http.ResponseWriter, r *http.Request) {
+func (h *HealthHandler) HandleScalingMetrics(ctx *fasthttp.RequestCtx) {
 	metrics := h.autoScaler.GetMetrics()
 	retryStats := h.retryQueueService.GetQueueStats()
 
 	response := map[string]interface{}{
 		"timestamp": time.Now().Format(time.RFC3339),
 		"auto_scaling": map[string]interface{}{
-			"queue_utilization":     metrics.QueueUtilization * 100, // Convert to percentage
+			"queue_utilization":     metrics.QueueUtilization * 100,
 			"current_queue_size":    metrics.CurrentQueueSize,
 			"processing_rate":       metrics.ProcessingRate,
 			"worker_efficiency":     metrics.WorkerEfficiency,
@@ -94,7 +106,8 @@ func (h *HealthHandler) HandleScalingMetrics(w http.ResponseWriter, r *http.Requ
 		},
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(response)
+	ctx.SetContentType("application/json")
+	ctx.SetStatusCode(fasthttp.StatusOK)
+	jsonResp, _ := json.Marshal(response)
+	ctx.SetBody(jsonResp)
 }

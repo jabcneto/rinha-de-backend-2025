@@ -58,11 +58,10 @@ func NewConnection(config *DatabaseConfig) (*sql.DB, error) {
 		return nil, fmt.Errorf("falha ao conectar ao banco após %d tentativas: %w", maxRetries, err)
 	}
 
-	// Configure connection pool for resource-constrained environment
-	db.SetMaxOpenConns(50)                  // Reduced for memory constraints
-	db.SetMaxIdleConns(25)                  // Keep fewer idle connections
-	db.SetConnMaxLifetime(15 * time.Minute) // Shorter lifetime
-	db.SetConnMaxIdleTime(3 * time.Minute)  // Close idle connections sooner
+	db.SetMaxOpenConns(30)
+	db.SetMaxIdleConns(12)
+	db.SetConnMaxLifetime(15 * time.Minute)
+	db.SetConnMaxIdleTime(3 * time.Minute)
 
 	return db, nil
 }

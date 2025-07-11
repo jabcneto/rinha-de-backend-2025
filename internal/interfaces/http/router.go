@@ -1,10 +1,8 @@
 package http
 
 import (
+	"github.com/valyala/fasthttp"
 	"rinha-backend-clean/internal/interfaces/http/handlers"
-	"rinha-backend-clean/internal/interfaces/middleware"
-
-	"github.com/gorilla/mux"
 )
 
 // Router sets up HTTP routes
@@ -13,7 +11,7 @@ type Router struct {
 	healthHandler  *handlers.HealthHandler
 }
 
-// NewRouter creates a new HTTP router
+// NewRouter cria um novo roteador fasthttp
 func NewRouter(paymentHandler *handlers.PaymentHandler, healthHandler *handlers.HealthHandler) *Router {
 	return &Router{
 		paymentHandler: paymentHandler,
@@ -21,23 +19,35 @@ func NewRouter(paymentHandler *handlers.PaymentHandler, healthHandler *handlers.
 	}
 }
 
-// SetupRoutes sets up all HTTP routes
-func (rt *Router) SetupRoutes() *mux.Router {
-	r := mux.NewRouter()
-
-	// Apply middleware
-	r.Use(middleware.LoggingMiddleware)
-	r.Use(middleware.RecoveryMiddleware)
-	r.Use(middleware.CORSMiddleware)
-
-	// Payment routes
-	r.HandleFunc("/payments", rt.paymentHandler.HandlePayments).Methods("POST")
-	r.HandleFunc("/payments-summary", rt.paymentHandler.HandlePaymentsSummary).Methods("GET")
-	r.HandleFunc("/purge-payments", rt.paymentHandler.HandlePurgePayments).Methods("POST")
-
-	// Health check routes
-	r.HandleFunc("/health", rt.healthHandler.HandleHealth).Methods("GET")
-	r.HandleFunc("/scaling-metrics", rt.healthHandler.HandleScalingMetrics).Methods("GET")
-
-	return r
+// SetupRoutes configura todas as rotas HTTP usando fasthttp
+func (rt *Router) Handler(ctx *fasthttp.RequestCtx) {
+	switch string(ctx.Path()) {
+	case "/payments":
+		if string(ctx.Method()) == fasthttp.MethodPost {
+			rt.paymentHandler.HandlePayments(ctx)
+			return
+		}
+	case "/payments-summary":
+		if string(ctx.Method()) == fasthttp.MethodGet {
+			rt.paymentHandler.HandlePaymentsSummary(ctx)
+			return
+		}
+	case "/purge-payments":
+		if string(ctx.Method()) == fasthttp.MethodPost {
+			rt.paymentHandler.HandlePurgePayments(ctx)
+			return
+		}
+	case "/health":
+		if string(ctx.Method()) == fasthttp.MethodGet {
+			rt.healthHandler.HandleHealth(ctx)
+			return
+		}
+	case "/scaling-metrics":
+		if string(ctx.Method()) == fasthttp.MethodGet {
+			rt.healthHandler.HandleScalingMetrics(ctx)
+			return
+		}
+	}
+	ctx.SetStatusCode(fasthttp.StatusNotFound)
+	ctx.SetBodyString("404 page not found")
 }

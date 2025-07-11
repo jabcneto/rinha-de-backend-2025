@@ -62,8 +62,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '0.65'
-          memory: 155MB
+          cpus: '0.5'
+          memory: 120MB
     healthcheck:
       test: [ "CMD-SHELL", "pg_isready -U postgres -d payments" ]
       interval: 15s
@@ -94,8 +94,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '0.4'
-          memory: 90MB
+          cpus: '0.3'
+          memory: 70MB
 
   api2:
     build: .
@@ -120,13 +120,13 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '0.4'
-          memory: 90MB
+          cpus: '0.3'
+          memory: 70MB
 
   nginx:
-    image: nginx:alpine
-    ports:
-      - "9999:9999"
+    image: nginx:1.25-alpine
+    container_name: nginx
+    restart: unless-stopped
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
     depends_on:
@@ -134,11 +134,22 @@ services:
       - api2
     networks:
       - rinha-network
+    ports:
+      - "9999:9999"
     deploy:
       resources:
         limits:
-          cpus: '0.15'
-          memory: 35MB
+          cpus: '0.3'
+          memory: 30MB
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --save 60 1 --loglevel warning
+    restart: unless-stopped
+    mem_limit: 60m
+    cpus: 0.3
+    networks:
+      - rinha-network
 
 volumes:
   postgres_data:

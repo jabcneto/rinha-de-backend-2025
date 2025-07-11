@@ -2,14 +2,14 @@ package main
 
 import (
 	"context"
-	"net/http"
 	"os"
 	"os/signal"
 	"strconv"
 	"syscall"
-	"time"
 
+	"github.com/valyala/fasthttp"
 	"rinha-backend-clean/internal/application/usecases"
+	"rinha-backend-clean/internal/infrastructure/cache"
 	"rinha-backend-clean/internal/infrastructure/database"
 	"rinha-backend-clean/internal/infrastructure/external"
 	"rinha-backend-clean/internal/infrastructure/logger"
@@ -50,13 +50,21 @@ func main() {
 	getPaymentSummaryUC := usecases.NewGetPaymentSummaryUseCase(paymentRepo)
 	purgePaymentsUC := usecases.NewPurgePaymentsUseCase(paymentRepo)
 
+	// Initialize Redis cache
+	redisAddr := os.Getenv("REDIS_ADDR")
+	if redisAddr == "" {
+		redisAddr = "localhost:6379"
+	}
+	redisPassword := os.Getenv("REDIS_PASSWORD")
+	redisDB := 0
+	redisCache := cache.NewRedisCache(redisAddr, redisPassword, redisDB)
+
 	// Initialize handlers
 	paymentHandler := handlers.NewPaymentHandler(processPaymentUC, getPaymentSummaryUC, purgePaymentsUC)
-	healthHandler := handlers.NewHealthHandler(queueService, retryQueueService, autoScaler)
+	healthHandler := handlers.NewHealthHandler(queueService, retryQueueService, autoScaler, redisCache)
 
 	// Initialize router
 	router := httpInterface.NewRouter(paymentHandler, healthHandler)
-	httpRouter := router.SetupRoutes()
 
 	// Start background services
 	ctx, cancel := context.WithCancel(context.Background())
@@ -78,19 +86,12 @@ func main() {
 	// Start auto-scaler
 	autoScaler.Start()
 
-	// Setup HTTP server
-	server := &http.Server{
-		Addr:         ":" + strconv.Itoa(config.Server.Port),
-		Handler:      httpRouter,
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 15 * time.Second,
-		IdleTimeout:  60 * time.Second,
-	}
+	// Setup fasthttp server
+	serverAddr := ":" + strconv.Itoa(config.Server.Port)
+	logger.Infof("Servidor iniciado na porta %d", config.Server.Port)
 
-	// Start server in a goroutine
 	go func() {
-		logger.Infof("Servidor iniciado na porta %d", config.Server.Port)
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := fasthttp.ListenAndServe(serverAddr, router.Handler); err != nil {
 			logger.Fatalf("Erro ao iniciar servidor: %v", err)
 		}
 	}()
@@ -101,25 +102,6 @@ func main() {
 	<-quit
 
 	logger.Info("Iniciando shutdown graceful...")
-
-	// Create a deadline for shutdown
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer shutdownCancel()
-
-	// Shutdown HTTP server
-	if err := server.Shutdown(shutdownCtx); err != nil {
-		logger.Warnf("Erro durante shutdown do servidor: %v", err)
-	}
-
-	// Stop queue processing
-	if err := queueService.Stop(shutdownCtx); err != nil {
-		logger.Warnf("Erro ao parar processamento da fila: %v", err)
-	}
-
-	// Stop retry queue processing
-	if err := retryQueueService.Stop(); err != nil {
-		logger.Warnf("Erro ao parar processamento da fila de retry: %v", err)
-	}
 
 	// Cancel background services
 	cancel()
