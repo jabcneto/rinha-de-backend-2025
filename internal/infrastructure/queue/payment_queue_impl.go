@@ -148,19 +148,19 @@ func (q *PaymentQueueImpl) processPayment(payment *entities.Payment, processor s
 	payment.MarkAsProcessed(processorType)
 	if err := repository.Update(ctx, payment); err != nil {
 		logger.Errorf("Erro ao atualizar pagamento %s: %v", payment.CorrelationID, err)
+		return
 	}
 
-	// Update summary (non-blocking)
-	if err := repository.UpdateSummary(ctx, processorType, payment.Amount); err != nil {
-		logger.Errorf("Erro ao atualizar resumo do pagamento %s: %v", payment.CorrelationID, err)
-	} else {
-		logger.Infof("Pagamento %s processado com sucesso via %s", payment.CorrelationID, processorType)
+	// Recarrega o pagamento do banco para garantir que está persistido como 'processed'
+	persistedPayment, err := repository.FindByCorrelationID(ctx, payment.CorrelationID)
+	if err != nil {
+		logger.Errorf("Erro ao buscar pagamento persistido %s: %v", payment.CorrelationID, err)
+		return
 	}
 
-	// Atualiza o resumo apenas se o pagamento estiver com status 'processed'
-	if payment.Status == entities.PaymentStatus("processed") {
+	if persistedPayment.Status == entities.PaymentStatus("processed") {
 		for {
-			err := repository.UpdateSummary(ctx, processorType, payment.Amount)
+			err := repository.UpdateSummary(ctx, processorType, persistedPayment.Amount)
 			if err != nil {
 				logger.Errorf("Erro ao atualizar resumo do pagamento %s: %v", payment.CorrelationID, err)
 				continue // retenta imediatamente

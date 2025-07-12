@@ -190,64 +190,42 @@ func (r *PaymentRepositoryImpl) Update(ctx context.Context, payment *entities.Pa
 func (r *PaymentRepositoryImpl) GetSummary(ctx context.Context, filter *entities.PaymentSummaryFilter) (*entities.PaymentSummary, error) {
 	summary := entities.NewPaymentSummary()
 
-	// If no filters, return aggregated data from payment_summary table
-	if filter == nil || (filter.From == nil && filter.To == nil) {
-		// Query default processor summary
-		row := r.db.QueryRowContext(ctx, "SELECT total_requests, total_amount FROM payment_summary WHERE processor_type = $1", "default")
-		err := row.Scan(&summary.Default.TotalRequests, &summary.Default.TotalAmount)
-		if err != nil && err != sql.ErrNoRows {
-			return nil, fmt.Errorf("erro ao obter resumo default: %w", err)
-		}
-
-		// Query fallback processor summary
-		row = r.db.QueryRowContext(ctx, "SELECT total_requests, total_amount FROM payment_summary WHERE processor_type = $1", "fallback")
-		err = row.Scan(&summary.Fallback.TotalRequests, &summary.Fallback.TotalAmount)
-		if err != nil && err != sql.ErrNoRows {
-			return nil, fmt.Errorf("erro ao obter resumo fallback: %w", err)
-		}
-
-		return summary, nil
-	}
-
-	// If there are filters, query the payments table directly
-	whereClause := "WHERE 1=1"
+	// Sempre consulta diretamente da tabela payments, garantindo consistência
+	whereClause := "WHERE status = 'processed'"
 	args := []interface{}{}
 	argIndex := 1
 
-	if filter.From != nil {
+	if filter != nil && filter.From != nil {
 		whereClause += fmt.Sprintf(" AND created_at >= $%d", argIndex)
 		args = append(args, filter.From)
 		argIndex++
 	}
 
-	if filter.To != nil {
+	if filter != nil && filter.To != nil {
 		whereClause += fmt.Sprintf(" AND created_at <= $%d", argIndex)
 		args = append(args, filter.To)
 		argIndex++
 	}
 
-	// Query default processor summary with filters
-	query := fmt.Sprintf(`
+	// Query default processor summary
+	queryDefault := fmt.Sprintf(`
 		SELECT 
 			COALESCE(COUNT(*), 0) as total_requests,
 			COALESCE(SUM(amount), 0) as total_amount
 		FROM payments 
 		%s AND processor_type = $%d
 	`, whereClause, argIndex)
-
 	argsDefault := append(args, "default")
-	row := r.db.QueryRowContext(ctx, query, argsDefault...)
-	err := row.Scan(&summary.Default.TotalRequests, &summary.Default.TotalAmount)
-	if err != nil {
-		return nil, fmt.Errorf("erro ao obter resumo default com filtros: %w", err)
+	row := r.db.QueryRowContext(ctx, queryDefault, argsDefault...)
+	if err := row.Scan(&summary.Default.TotalRequests, &summary.Default.TotalAmount); err != nil {
+		return nil, fmt.Errorf("erro ao obter resumo default: %w", err)
 	}
 
-	// Query fallback processor summary with filters
+	// Query fallback processor summary
 	argsFallback := append(args, "fallback")
-	row = r.db.QueryRowContext(ctx, query, argsFallback...)
-	err = row.Scan(&summary.Fallback.TotalRequests, &summary.Fallback.TotalAmount)
-	if err != nil {
-		return nil, fmt.Errorf("erro ao obter resumo fallback com filtros: %w", err)
+	row = r.db.QueryRowContext(ctx, queryDefault, argsFallback...)
+	if err := row.Scan(&summary.Fallback.TotalRequests, &summary.Fallback.TotalAmount); err != nil {
+		return nil, fmt.Errorf("erro ao obter resumo fallback: %w", err)
 	}
 
 	return summary, nil
@@ -516,17 +494,19 @@ func (r *PaymentRepositoryImpl) PurgeSummary(ctx context.Context) error {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
 
-	// Clear batch buffer first
-	r.batchMutex.Lock()
-	r.batchBuffer = make(map[entities.ProcessorType]*BatchUpdate)
-	r.batchMutex.Unlock()
+	// Limpa a tabela de pagamentos
+	_, err := r.db.ExecContext(ctx, "DELETE FROM payments")
+	if err != nil {
+		return fmt.Errorf("erro ao limpar pagamentos: %w", err)
+	}
 
-	_, err := r.db.ExecContext(ctx, "UPDATE payment_summary SET total_requests = 0, total_amount = 0.00")
+	// Limpa o resumo
+	_, err = r.db.ExecContext(ctx, "UPDATE payment_summary SET total_requests = 0, total_amount = 0.00")
 	if err != nil {
 		return fmt.Errorf("erro ao limpar resumo de pagamentos: %w", err)
 	}
 
-	// Clear cache
+	// Limpa o cache
 	r.cache.mutex.Lock()
 	r.cache.data.Reset()
 	r.cache.lastUpdate = time.Now()

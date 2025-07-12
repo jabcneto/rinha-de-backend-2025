@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 
+	"github.com/google/uuid"
 	"rinha-backend-clean/internal/domain/entities"
 )
 
@@ -32,4 +33,6 @@ type PaymentRepository interface {
 	UpdateSummary(ctx context.Context, processorType entities.ProcessorType, amount float64) error
 	// Update updates an existing payment
 	Update(ctx context.Context, payment *entities.Payment) error
+	// FindByCorrelationID finds a payment by its correlation ID
+	FindByCorrelationID(ctx context.Context, correlationID uuid.UUID) (*entities.Payment, error)
 }

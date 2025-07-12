@@ -70,9 +70,9 @@ func (p *Payment) MarkAsFailed() {
 	p.UpdatedAt = time.Now()
 }
 
-// MarkAsDiscarded marks the payment as failed (descartado)
+// MarkAsDiscarded marks the payment as discarded
 func (p *Payment) MarkAsDiscarded() {
-	p.Status = PaymentStatusFailed
+	p.Status = PaymentStatusDiscarded
 	p.UpdatedAt = time.Now()
 }
 
@@ -81,21 +81,20 @@ func (p *Payment) IsValid() bool {
 	return p.CorrelationID != uuid.Nil && p.Amount > 0
 }
 
-// MarkForRetry marks the payment for retry with exponential backoff
+// MarkForRetry marks the payment for retry
 func (p *Payment) MarkForRetry(err error, maxRetries int) bool {
 	p.RetryCount++
 	p.LastError = err.Error()
 	p.UpdatedAt = time.Now()
 
+	// Ao exceder o número de tentativas, descarta o pagamento
 	if p.RetryCount > maxRetries {
 		p.MarkAsDiscarded()
 		return false
 	}
 
-	// Exponential backoff: 2^retryCount seconds
-	backoffSeconds := 1 << p.RetryCount // 2, 4, 8, 16, 32 seconds
-	nextRetry := time.Now().Add(time.Duration(backoffSeconds) * time.Second)
-	p.NextRetryAt = &nextRetry
+	// Remove o cálculo de backoff e próxima tentativa
+	p.NextRetryAt = nil
 
 	return true
 }

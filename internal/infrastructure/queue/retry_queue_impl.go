@@ -300,7 +300,6 @@ func (rq *RetryQueueImpl) processPermanentRetry(payment *entities.Payment, proce
 	// Try default first
 	err = processor.ProcessWithDefault(ctx, payment)
 	if err == nil {
-		// Success with default
 		payment.MarkAsProcessed(entities.ProcessorTypeDefault)
 		if updateErr := repository.Update(ctx, payment); updateErr != nil {
 			logger.Errorf("Erro ao atualizar pagamento %s: %v", payment.CorrelationID, updateErr)
@@ -312,7 +311,6 @@ func (rq *RetryQueueImpl) processPermanentRetry(payment *entities.Payment, proce
 	// If default fails, try fallback
 	err = processor.ProcessWithFallback(ctx, payment)
 	if err == nil {
-		// Success with fallback
 		payment.MarkAsProcessed(entities.ProcessorTypeFallback)
 		if updateErr := repository.Update(ctx, payment); updateErr != nil {
 			logger.Errorf("Erro ao atualizar pagamento %s: %v", payment.CorrelationID, updateErr)
@@ -322,27 +320,12 @@ func (rq *RetryQueueImpl) processPermanentRetry(payment *entities.Payment, proce
 	}
 
 	// Both processors failed
-	logger.Errorf("Erro ao reprocessar pagamento no permanent retry: %v", err)
-
-	// Check if we should continue retrying or mark as failed
-	if payment.RetryCount < rq.maxPermanentRetries {
-		// Increment retry count and re-enqueue with exponential backoff
-		payment.RetryCount++
-
-		// Wait before re-enqueuing (exponential backoff)
-		backoffDuration := time.Duration(payment.RetryCount) * rq.permanentTickerInterval
-		time.Sleep(backoffDuration)
-
-		if retryErr := rq.EnqueueForPermanentRetry(ctx, payment); retryErr != nil {
-			logger.Errorf("Erro ao re-enfileirar para permanent retry: %v", retryErr)
-			rq.handleFailedPayment(ctx, payment, repository)
-		} else {
-			logger.Infof("Pagamento %s re-enfileirado para permanent retry (tentativa %d)", payment.CorrelationID, payment.RetryCount)
-		}
-	} else {
-		// Exceeded max permanent retries, mark as failed
-		rq.handleFailedPayment(ctx, payment, repository)
+	payment.MarkAsDiscarded()
+	if updateErr := repository.Update(ctx, payment); updateErr != nil {
+		logger.Errorf("Erro ao atualizar pagamento %s: %v", payment.CorrelationID, updateErr)
 	}
+	logger.Errorf("Pagamento %s marcado como descartado após falha no permanent retry: %v", payment.CorrelationID, err)
+	return
 }
 
 // shouldBypassCircuitBreaker determines if we should bypass circuit breaker for critical payments
