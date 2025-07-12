@@ -95,39 +95,49 @@ func (q *PaymentQueueImpl) processPayment(payment *entities.Payment, processor s
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
+	// IGNORA pagamentos descartados
+	if payment.Status == entities.PaymentStatusDiscarded {
+		logger.Warnf("Pagamento %s ignorado: status descartado", payment.CorrelationID)
+		return
+	}
+
 	// Try to process payment first
 	processorType, err := processor.ProcessPayment(ctx, payment)
 	if err != nil {
 		logger.Errorf("Erro ao processar pagamento %s: %v", payment.CorrelationID, err)
 
-		// Instead of marking as failed immediately, try to enqueue for retry
+		// Cancelar pagamento após 3 tentativas, sem enviar para retentativa
+		if payment.RetryCount >= 2 { // 1 tentativa inicial + 2 retentativas = 3
+			payment.MarkAsDiscarded()
+			logger.Warnf("Pagamento %s cancelado após 3 tentativas", payment.CorrelationID)
+			if updateErr := repository.Update(ctx, payment); updateErr != nil {
+				logger.Errorf("Erro ao atualizar status do pagamento %s: %v", payment.CorrelationID, updateErr)
+			}
+			return
+		}
+
+		// Caso contrário, marcar para retry normalmente
 		q.mutex.RLock()
 		retryService := q.retryQueueService
 		q.mutex.RUnlock()
 
 		if retryService != nil {
-			// Mark for retry with exponential backoff
-			if payment.MarkForRetry(err, 2) { // Max 2 retries for initial processing
-				// Enqueue for default processor retry
+			if payment.MarkForRetry(err, 2) {
 				if retryErr := retryService.EnqueueForDefaultRetry(ctx, payment); retryErr != nil {
 					logger.Errorf("Erro ao enfileirar pagamento %s para retry: %v", payment.CorrelationID, retryErr)
-					// If can't enqueue for retry, mark as failed
-					payment.MarkAsFailed()
+					payment.MarkAsDiscarded()
 				} else {
 					logger.Infof("Pagamento %s enfileirado para retry (tentativa %d)", payment.CorrelationID, payment.RetryCount)
 				}
 			} else {
-				// Exceeded max retries, mark as failed
-				payment.MarkAsFailed()
-				logger.Infof("Pagamento %s marcado como failed após exceder tentativas", payment.CorrelationID)
+				payment.MarkAsDiscarded()
+				logger.Warnf("Pagamento %s cancelado após exceder tentativas", payment.CorrelationID)
 			}
 		} else {
-			// No retry service available, mark as failed
-			payment.MarkAsFailed()
-			logger.Infof("Pagamento %s marcado como failed (sem retry service)", payment.CorrelationID)
+			payment.MarkAsDiscarded()
+			logger.Warnf("Pagamento %s cancelado (sem retry service)", payment.CorrelationID)
 		}
 
-		// Update payment in database
 		if updateErr := repository.Update(ctx, payment); updateErr != nil {
 			logger.Errorf("Erro ao atualizar status do pagamento %s: %v", payment.CorrelationID, updateErr)
 		}
@@ -145,6 +155,20 @@ func (q *PaymentQueueImpl) processPayment(payment *entities.Payment, processor s
 		logger.Errorf("Erro ao atualizar resumo do pagamento %s: %v", payment.CorrelationID, err)
 	} else {
 		logger.Infof("Pagamento %s processado com sucesso via %s", payment.CorrelationID, processorType)
+	}
+
+	// Atualiza o resumo apenas se o pagamento estiver com status 'processed'
+	if payment.Status == entities.PaymentStatus("processed") {
+		for {
+			err := repository.UpdateSummary(ctx, processorType, payment.Amount)
+			if err != nil {
+				logger.Errorf("Erro ao atualizar resumo do pagamento %s: %v", payment.CorrelationID, err)
+				continue // retenta imediatamente
+			} else {
+				logger.Infof("Pagamento %s processado com sucesso via %s", payment.CorrelationID, processorType)
+				break
+			}
+		}
 	}
 }
 

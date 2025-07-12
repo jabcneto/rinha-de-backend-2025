@@ -3,11 +3,12 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/valyala/fasthttp"
 	"rinha-backend-clean/internal/domain/services"
-	"rinha-backend-clean/internal/infrastructure/cache"
+	"rinha-backend-clean/internal/infrastructure/external"
 	"rinha-backend-clean/internal/infrastructure/queue"
 )
 
@@ -16,7 +17,7 @@ type HealthHandler struct {
 	queueService      services.QueueService
 	retryQueueService services.RetryQueueService
 	autoScaler        *queue.AutoScaler
-	cache             *cache.RedisCache
+	processorService  services.PaymentProcessorService
 }
 
 // NewHealthHandler creates a new health handler
@@ -24,26 +25,18 @@ func NewHealthHandler(
 	queueService services.QueueService,
 	retryQueueService services.RetryQueueService,
 	autoScaler *queue.AutoScaler,
-	cache *cache.RedisCache,
+	processorService services.PaymentProcessorService,
 ) *HealthHandler {
 	return &HealthHandler{
 		queueService:      queueService,
 		retryQueueService: retryQueueService,
 		autoScaler:        autoScaler,
-		cache:             cache,
+		processorService:  processorService,
 	}
 }
 
 // HandleHealth handles GET /health requests
 func (h *HealthHandler) HandleHealth(ctx *fasthttp.RequestCtx) {
-	cacheKey := "health-check-result"
-	cached, err := h.cache.Get(context.Background(), cacheKey)
-	if err == nil && cached != "" {
-		ctx.SetContentType("application/json")
-		ctx.SetBodyString(cached)
-		return
-	}
-
 	queueStats := map[string]interface{}{
 		"queue_size": h.queueService.GetQueueSize(),
 	}
@@ -67,7 +60,6 @@ func (h *HealthHandler) HandleHealth(ctx *fasthttp.RequestCtx) {
 		},
 	}
 	jsonResp, _ := json.Marshal(response)
-	h.cache.Set(context.Background(), cacheKey, string(jsonResp), 2*time.Second)
 	ctx.SetContentType("application/json")
 	ctx.SetBody(jsonResp)
 }
@@ -110,4 +102,73 @@ func (h *HealthHandler) HandleScalingMetrics(ctx *fasthttp.RequestCtx) {
 	ctx.SetStatusCode(fasthttp.StatusOK)
 	jsonResp, _ := json.Marshal(response)
 	ctx.SetBody(jsonResp)
+}
+
+// HandleCircuitBreakerStatus handles GET /circuit-breakers requests
+func (h *HealthHandler) HandleCircuitBreakerStatus(ctx *fasthttp.RequestCtx) {
+	// Type assertion to get the concrete type that has GetIntegratedStats
+	if processorClient, ok := h.processorService.(*external.PaymentProcessorClient); ok {
+		stats := processorClient.GetIntegratedStats()
+
+		// Get processor health status
+		healthStatus, _ := h.processorService.GetHealthStatus(context.Background())
+
+		response := map[string]interface{}{
+			"timestamp":        time.Now().Format(time.RFC3339),
+			"circuit_breakers": stats["circuit_breakers"],
+			"processor_health": healthStatus,
+			"recommendations":  h.generateCircuitBreakerRecommendations(stats),
+			"integrated_stats": stats,
+		}
+
+		ctx.SetContentType("application/json")
+		ctx.SetStatusCode(fasthttp.StatusOK)
+		jsonResp, _ := json.Marshal(response)
+		ctx.SetBody(jsonResp)
+	} else {
+		ctx.SetStatusCode(fasthttp.StatusServiceUnavailable)
+		ctx.SetBodyString(`{"error": "Circuit breaker stats not available"}`)
+	}
+}
+
+// generateCircuitBreakerRecommendations provides optimization suggestions
+func (h *HealthHandler) generateCircuitBreakerRecommendations(stats map[string]interface{}) []string {
+	recommendations := make([]string, 0)
+
+	for processorName, processorStats := range stats {
+		if processorMap, ok := processorStats.(map[string]interface{}); ok {
+			state := processorMap["state"].(string)
+			failureCount := int(processorMap["failure_count"].(float64))
+			timeToResetMs := int64(processorMap["time_to_reset_ms"].(float64))
+
+			switch state {
+			case "open":
+				if timeToResetMs > 1000 { // Mais de 1 segundo
+					recommendations = append(recommendations,
+						fmt.Sprintf("%s: Circuit breaker aberto há muito tempo (%dms). Considere reduzir reset_timeout",
+							processorName, timeToResetMs))
+				}
+				if failureCount > 5 {
+					recommendations = append(recommendations,
+						fmt.Sprintf("%s: Muitas falhas (%d). Verifique a saúde do serviço",
+							processorName, failureCount))
+				}
+			case "half-open":
+				recommendations = append(recommendations,
+					fmt.Sprintf("%s: Em estado half-open. Monitorar próximas tentativas", processorName))
+			case "closed":
+				if failureCount > 0 {
+					recommendations = append(recommendations,
+						fmt.Sprintf("%s: %d falhas recentes, mas circuit breaker fechado. Performance OK",
+							processorName, failureCount))
+				}
+			}
+		}
+	}
+
+	if len(recommendations) == 0 {
+		recommendations = append(recommendations, "Todos os circuit breakers estão funcionando normalmente")
+	}
+
+	return recommendations
 }

@@ -6,70 +6,20 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       POSTGRES_INITDB_ARGS: "--data-checksums"
-    command: >
-      postgres
-      -c shared_buffers=32MB
-      -c effective_cache_size=64MB
-      -c maintenance_work_mem=6MB
-      -c checkpoint_completion_target=0.9
-      -c wal_buffers=6MB
-      -c default_statistics_target=50
-      -c random_page_cost=1.1
-      -c effective_io_concurrency=100
-      -c work_mem=1MB
-      -c min_wal_size=256MB
-      -c max_wal_size=1GB
-      -c max_connections=150
-      -c max_prepared_transactions=150
-      -c shared_preload_libraries='pg_stat_statements'
-      -c wal_level=replica
-      -c max_wal_senders=2
-      -c max_replication_slots=2
-      -c hot_standby=on
-      -c hot_standby_feedback=on
-      -c log_statement=none
-      -c log_duration=off
-      -c log_min_duration_statement=10000
-      -c log_checkpoints=off
-      -c log_connections=off
-      -c log_disconnections=off
-      -c log_lock_waits=on
-      -c deadlock_timeout=1s
-      -c lock_timeout=5s
-      -c statement_timeout=30s
-      -c idle_in_transaction_session_timeout=60s
-      -c tcp_keepalives_idle=300
-      -c tcp_keepalives_interval=30
-      -c tcp_keepalives_count=3
-      -c fsync=off
-      -c synchronous_commit=off
-      -c wal_compression=on
-      -c wal_writer_delay=500ms
-      -c checkpoint_timeout=30min
-      -c checkpoint_flush_after=256kB
-      -c bgwriter_delay=500ms
-      -c bgwriter_lru_maxpages=50
-      -c bgwriter_lru_multiplier=2.0
-      -c bgwriter_flush_after=512kB
-    ports:
-      - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./init.sql:/docker-entrypoint-initdb.d/init.sql
-      - ./postgresql.conf:/etc/postgresql/postgresql.conf
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d payments"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
     networks:
       - rinha-network
-    deploy:
-      resources:
-        limits:
-          cpus: '0.5'
-          memory: 120MB
-    healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U postgres -d payments" ]
-      interval: 15s
-      timeout: 5s
-      retries: 3
-    restart: unless-stopped
 
   api1:
     build: .
@@ -87,10 +37,18 @@ services:
       - LOG_LEVEL=error
       - LOG_FORMAT=text
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
     networks:
       - rinha-network
       - payment-processor
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9999/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
     deploy:
       resources:
         limits:
@@ -113,10 +71,18 @@ services:
       - LOG_LEVEL=error
       - LOG_FORMAT=text
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
     networks:
       - rinha-network
       - payment-processor
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9999/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
     deploy:
       resources:
         limits:
@@ -130,8 +96,10 @@ services:
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
     depends_on:
-      - api1
-      - api2
+      api1:
+        condition: service_healthy
+      api2:
+        condition: service_healthy
     networks:
       - rinha-network
     ports:
@@ -139,17 +107,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '0.3'
+          cpus: '0.1'
           memory: 30MB
-
-  redis:
-    image: redis:7-alpine
-    command: redis-server --save 60 1 --loglevel warning
-    restart: unless-stopped
-    mem_limit: 60m
-    cpus: 0.3
-    networks:
-      - rinha-network
 
 volumes:
   postgres_data:

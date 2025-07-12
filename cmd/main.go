@@ -4,12 +4,13 @@ import (
 	"context"
 	"os"
 	"os/signal"
+	"rinha-backend-clean/internal/domain/repositories"
 	"strconv"
 	"syscall"
+	"time"
 
 	"github.com/valyala/fasthttp"
 	"rinha-backend-clean/internal/application/usecases"
-	"rinha-backend-clean/internal/infrastructure/cache"
 	"rinha-backend-clean/internal/infrastructure/database"
 	"rinha-backend-clean/internal/infrastructure/external"
 	"rinha-backend-clean/internal/infrastructure/logger"
@@ -29,10 +30,14 @@ func main() {
 	if err != nil {
 		logger.Fatalf("Erro ao conectar ao banco de dados: %v", err)
 	}
-	defer db.Close()
+	defer func() {
+		if closeErr := db.Close(); closeErr != nil {
+			logger.Errorf("Erro ao fechar conexão com banco: %v", closeErr)
+		}
+	}()
 
 	// Initialize repositories
-	paymentRepo := database.NewPaymentRepository(db)
+	paymentRepo := repositories.NewPaymentRepository(db)
 
 	// Initialize services
 	paymentProcessor := external.NewPaymentProcessorClient()
@@ -50,18 +55,9 @@ func main() {
 	getPaymentSummaryUC := usecases.NewGetPaymentSummaryUseCase(paymentRepo)
 	purgePaymentsUC := usecases.NewPurgePaymentsUseCase(paymentRepo)
 
-	// Initialize Redis cache
-	redisAddr := os.Getenv("REDIS_ADDR")
-	if redisAddr == "" {
-		redisAddr = "localhost:6379"
-	}
-	redisPassword := os.Getenv("REDIS_PASSWORD")
-	redisDB := 0
-	redisCache := cache.NewRedisCache(redisAddr, redisPassword, redisDB)
-
 	// Initialize handlers
 	paymentHandler := handlers.NewPaymentHandler(processPaymentUC, getPaymentSummaryUC, purgePaymentsUC)
-	healthHandler := handlers.NewHealthHandler(queueService, retryQueueService, autoScaler, redisCache)
+	healthHandler := handlers.NewHealthHandler(queueService, retryQueueService, autoScaler, paymentProcessor)
 
 	// Initialize router
 	router := httpInterface.NewRouter(paymentHandler, healthHandler)
@@ -86,12 +82,29 @@ func main() {
 	// Start auto-scaler
 	autoScaler.Start()
 
-	// Setup fasthttp server
+	// Setup fasthttp server with optimized settings
 	serverAddr := ":" + strconv.Itoa(config.Server.Port)
 	logger.Infof("Servidor iniciado na porta %d", config.Server.Port)
 
+	// Configure fasthttp server for high performance
+	server := &fasthttp.Server{
+		Handler:                       router.Handler,
+		Name:                          "rinha-backend-2025",
+		ReadTimeout:                   10 * time.Second, // Timeout para ler request
+		WriteTimeout:                  10 * time.Second, // Timeout para escrever response
+		IdleTimeout:                   60 * time.Second, // Timeout para conexões idle
+		MaxConnsPerIP:                 1000,             // Máximo de conexões por IP
+		MaxRequestsPerConn:            10000,            // Máximo de requests por conexão
+		MaxRequestBodySize:            1024 * 1024,      // 1MB max body size
+		ReduceMemoryUsage:             true,             // Reduzir uso de memória
+		DisableKeepalive:              false,            // Manter keep-alive habilitado
+		TCPKeepalive:                  true,             // TCP keep-alive
+		Concurrency:                   50000,            // Máximo de conexões concorrentes
+		DisableHeaderNamesNormalizing: true,             // Performance boost
+	}
+
 	go func() {
-		if err := fasthttp.ListenAndServe(serverAddr, router.Handler); err != nil {
+		if err := server.ListenAndServe(serverAddr); err != nil {
 			logger.Fatalf("Erro ao iniciar servidor: %v", err)
 		}
 	}()

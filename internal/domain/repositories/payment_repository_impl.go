@@ -1,4 +1,4 @@
-package database
+package repositories
 
 import (
 	"context"
@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"rinha-backend-clean/internal/domain/entities"
-	"rinha-backend-clean/internal/domain/repositories"
 	"rinha-backend-clean/internal/infrastructure/logger"
 
 	"github.com/google/uuid"
@@ -45,7 +44,7 @@ type SummaryCache struct {
 }
 
 // NewPaymentRepository creates a new payment repository
-func NewPaymentRepository(db *sql.DB) repositories.PaymentRepository {
+func NewPaymentRepository(db *sql.DB) PaymentRepository {
 	cache := &SummaryCache{
 		data: entities.NewPaymentSummary(),
 		ttl:  5 * time.Second, // Cache TTL of 5 seconds
@@ -71,12 +70,12 @@ func NewPaymentRepository(db *sql.DB) repositories.PaymentRepository {
 	return repo
 }
 
-// Save saves a payment to the repository (uses UPSERT)
+// Save saves a payment to the repository (uses UPSERT for correlation_id)
 func (r *PaymentRepositoryImpl) Save(ctx context.Context, payment *entities.Payment) error {
 	query := `
 		INSERT INTO payments (id, correlation_id, amount, status, processor_type, requested_at, processed_at, created_at, updated_at, retry_count, next_retry_at, last_error)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-		ON CONFLICT (id) DO UPDATE SET
+		ON CONFLICT (correlation_id) DO UPDATE SET
 			status = EXCLUDED.status,
 			processor_type = EXCLUDED.processor_type,
 			processed_at = EXCLUDED.processed_at,

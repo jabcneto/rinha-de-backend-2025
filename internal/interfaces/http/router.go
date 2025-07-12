@@ -47,7 +47,12 @@ func (rt *Router) Handler(ctx *fasthttp.RequestCtx) {
 			rt.healthHandler.HandleScalingMetrics(ctx)
 			return
 		}
+	case "/circuit-breakers":
+		if string(ctx.Method()) == fasthttp.MethodGet {
+			rt.healthHandler.HandleCircuitBreakerStatus(ctx)
+			return
+		}
 	}
 	ctx.SetStatusCode(fasthttp.StatusNotFound)
-	ctx.SetBodyString("404 page not found")
+	ctx.SetBodyString(`{"error": "Not Found"}`)
 }

@@ -30,6 +30,7 @@ const (
 	PaymentStatusPending   PaymentStatus = "pending"
 	PaymentStatusProcessed PaymentStatus = "processed"
 	PaymentStatusFailed    PaymentStatus = "failed"
+	PaymentStatusDiscarded PaymentStatus = "discarded"
 )
 
 // ProcessorType represents the type of payment processor
@@ -69,6 +70,12 @@ func (p *Payment) MarkAsFailed() {
 	p.UpdatedAt = time.Now()
 }
 
+// MarkAsDiscarded marks the payment as failed (descartado)
+func (p *Payment) MarkAsDiscarded() {
+	p.Status = PaymentStatusFailed
+	p.UpdatedAt = time.Now()
+}
+
 // IsValid validates the payment entity
 func (p *Payment) IsValid() bool {
 	return p.CorrelationID != uuid.Nil && p.Amount > 0
@@ -81,7 +88,7 @@ func (p *Payment) MarkForRetry(err error, maxRetries int) bool {
 	p.UpdatedAt = time.Now()
 
 	if p.RetryCount > maxRetries {
-		p.MarkAsFailed()
+		p.MarkAsDiscarded()
 		return false
 	}
 

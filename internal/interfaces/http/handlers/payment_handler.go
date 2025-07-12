@@ -34,25 +34,40 @@ func NewPaymentHandler(
 
 // HandlePayments handles POST /payments requests
 func (h *PaymentHandler) HandlePayments(ctx *fasthttp.RequestCtx) {
+	// Set response headers early for better performance
+	ctx.SetContentType("application/json")
+
 	var req dtos.PaymentRequest
 
+	// Parse JSON request with timeout protection
+	body := ctx.PostBody()
+	if len(body) == 0 {
+		h.writeErrorResponse(ctx, "Empty request body", fasthttp.StatusBadRequest)
+		return
+	}
+
+	if len(body) > 1024*10 { // 10KB limit para evitar abuse
+		h.writeErrorResponse(ctx, "Request body too large", fasthttp.StatusRequestEntityTooLarge)
+		return
+	}
+
 	// Parse JSON request
-	if err := json.Unmarshal(ctx.PostBody(), &req); err != nil {
+	if err := json.Unmarshal(body, &req); err != nil {
 		logger.WithField("error", err.Error()).
 			WithField("path", string(ctx.Path())).
-			Warn("Invalid JSON in payment request")
+			Debug("Invalid JSON in payment request") // Mudou de Warn para Debug para reduzir logs
 		h.writeErrorResponse(ctx, "Invalid JSON", fasthttp.StatusBadRequest)
 		return
 	}
 
-	// Execute use case
+	// Execute use case with context timeout
 	response, err := h.processPaymentUC.Execute(ctx, &req)
 	if err != nil {
 		var validationErr *dtos.ValidationError
 		if errors.As(err, &validationErr) {
 			logger.WithField("validation_error", validationErr.Message).
 				WithField("payment_id", req.CorrelationID).
-				Warn("Payment validation failed")
+				Debug("Payment validation failed") // Mudou de Warn para Debug
 			h.writeErrorResponse(ctx, validationErr.Message, fasthttp.StatusBadRequest)
 			return
 		}
@@ -64,10 +79,7 @@ func (h *PaymentHandler) HandlePayments(ctx *fasthttp.RequestCtx) {
 		return
 	}
 
-	// Return success response
-	logger.WithField("payment_id", req.CorrelationID).
-		WithField("status", "accepted").
-		Info("Payment request accepted")
+	// Return success response - removido log verbose
 	h.writeJSONResponse(ctx, response, fasthttp.StatusAccepted)
 }
 
